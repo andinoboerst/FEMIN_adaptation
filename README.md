@@ -1,4 +1,4 @@
-# FEniCS_template
-Template for FEniCS projects in Docker.
+# FEMIN
+An implementation of FEMIN as proposed in this [paper](https://doi.org/10.1016/j.cma.2024.117073).
 
-Just change the name of the `project` folder and the `project_name` variable at the top of the makefile accordingly.
+The FEniCS framework is used for the simulations.
