@@ -1,0 +1,6 @@
+{
+    "makefile.configureOnOpen": true,
+    "files.watcherExclude": {},
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 50      
+}
