@@ -88,22 +88,14 @@ def tct_elastic_full() -> None:
     tdim = mesh.topology.dim
 
     # Initialize solution Function
-    u_k = Function(V)
+    u_k = Function(V, name="Displacement")
     u_prev = Function(V) # Function to store displacement from previous time step
-    velocity_k = Function(V) # Function to store velocity
-    sigma_h = Function(W)
-    n = Constant(mesh, np.array([0.0, -1.0]))
+    velocity_k = Function(V, name="Velocity") # Function to store velocity
+    # sigma_h = Function(W)
+    # n = Constant(mesh, np.array([0.0, -1.0]))
 
     # Initialize u_prev to zero
     u_prev.x.array[:] = 0.0
-
-    with open("tct_elastic_full.pkl", "wb") as f:
-        pickle.dump(vtk_mesh(mesh), f)
-
-
-    # xdmf_filename = "tct_results.xdmf" # Single file name for time series
-    # with XDMFFile(mesh.comm, xdmf_filename, "w") as xdmf_file:
-    #     xdmf_file.write_mesh(mesh) # Write mesh ONCE, outside the loop (for time series, mesh typically doesn't change topology)
 
     u_full = []
     v_full = []
@@ -152,19 +144,21 @@ def tct_elastic_full() -> None:
 
         # Save DEFORMED MESH and fields
         if step % 100 == 0:
-            u_full.append(u_k.x.array[:])
-            v_full.append(velocity_k.x.array[:])
+            u_full.append(u_k.x.array.copy())
+            v_full.append(velocity_k.x.array.copy())
 
         # --- Update u_prev for next time step ---
         u_prev.x.array[:] = u_k.x.array[:] # Copy current displacement to u_prev for next velocity calculation
 
     print("Simulation complete")
 
-    with open("u_full.npy", "wb") as f:
-        np.save(f, u_full)
+    return vtk_mesh(mesh), u_full, v_full
 
-    with open("v_full.npy", "wb") as f:
-        np.save(f, v_full)
+    # with open("u_full.npy", "wb") as f:
+    #     np.save(f, u_full)
+
+    # with open("v_full.npy", "wb") as f:
+    #     np.save(f, v_full)
 
 
 if __name__ == "__main__":
