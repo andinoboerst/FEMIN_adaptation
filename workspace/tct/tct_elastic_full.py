@@ -8,7 +8,6 @@ from dolfinx.mesh import create_rectangle, CellType
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem
 from ufl import TestFunction, TrialFunction, Identity, grad, inner, tr, dx
-from dolfinx.io import XDMFFile, VTKFile
 
 from misc.progress_bar import progressbar
 
