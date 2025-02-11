@@ -24,7 +24,8 @@
             "dbaeumer.vscode-eslint",  // ESLint extension
             "ms-vscode.makefile-tools",  // Makefile extension
             "ms-toolsai.jupyter",  // Jupyter extension
-            "codeium.codeium"  // Codeium
+            "codeium.codeium",  // Codeium
+            "ms-azuretools.vscode-docker"  // Docker extension
         ]
       }
     }
