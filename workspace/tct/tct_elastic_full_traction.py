@@ -1,10 +1,14 @@
 import numpy as np
+import pickle
+
+# import dolfinx
 from mpi4py import MPI
-from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
-from dolfinx.mesh import create_rectangle, CellType
+from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical, form, assemble_scalar
+from dolfinx.mesh import create_rectangle, CellType, locate_entities_boundary, meshtags
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem
-from ufl import TestFunction, TrialFunction, Identity, grad, inner, tr, dx
+from petsc4py import PETSc
+from ufl import TestFunction, TrialFunction, Identity, FacetNormal, Measure, grad, inner, tr, dx, dot, as_vector, sym
 
 from misc.progress_bar import progressbar
 
@@ -60,6 +64,7 @@ def tct_elastic_full() -> None:
 
 
     def epsilon(u):
+        return sym(grad(u))
         return 0.5 * (grad(u) + grad(u).T)
 
     def sigma(u):
@@ -113,6 +118,34 @@ def tct_elastic_full() -> None:
         u_k = problem.solve()
 
         velocity_k.x.array[:] = (u_k.x.array[:] - u_prev.x.array[:]) / dt
+
+        stress_tensor = sigma(u_k)
+
+        interface_tag = 88  # Replace with your actual interface tag
+        facet_integration_domain = locate_entities_boundary(mesh, mesh.topology.dim - 1, interface_boundary) # Example, adjust as needed if mesh tag not used directly. Use mesh tags for robustness!
+        facet_tags = meshtags(mesh, mesh.topology.dim - 1, facet_integration_domain, np.full(len(facet_integration_domain), interface_tag, dtype=np.int32))
+
+        ds_interface = Measure("ds", domain=mesh, subdomain_data=facet_tags, subdomain_id=interface_tag)
+
+        n = FacetNormal(mesh)
+
+        # --- 4. Define Unit Vectors ---
+        e_x = PETSc.Vec().createSeq(mesh.geometry.dim)
+        e_y = PETSc.Vec().createSeq(mesh.geometry.dim)
+        e_z = PETSc.Vec().createSeq(mesh.geometry.dim) # For 3D
+        e_x[0] = 1.0; e_y[1] = 1.0; # e_z[2] = 1.0 for 3D
+        e_x.assemble(); e_y.assemble(); # e_z.assemble()
+
+
+        # --- 5. Assemble Force Components ---
+        force_vector = []
+        for e_i in [e_x, e_y]: #, e_z for 3D
+            force_component = assemble_scalar(
+                form(dot(dot(stress_tensor, n), as_vector(e_i.array))) * ds_interface
+            )
+            force_vector.append(force_component)
+
+        force_x, force_y = force_vector #, force_z for 3D if in 3D
 
         # --- Calculate Stress and Extract at x=25 (using INITIAL node locations) ---
         # sigma_expr = sigma(u_k)
