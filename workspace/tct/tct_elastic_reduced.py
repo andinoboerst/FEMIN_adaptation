@@ -37,26 +37,14 @@ def tct_elastic_reduced() -> None:
 
     def bottom_boundary(x):
         return np.isclose(x[1], 0.0)
-    
-    boundaries = [bottom_boundary, top_boundary]
-
-    facet_indices, facet_markers = [], []
-    fdim = mesh.topology.dim - 1
-    for (marker, locator) in enumerate(boundaries):
-        facets = locate_entities(mesh, fdim, locator)
-        facet_indices.append(facets)
-        facet_markers.append(np.full_like(facets, marker))
-    facet_indices = np.hstack(facet_indices).astype(np.int32)
-    facet_markers = np.hstack(facet_markers).astype(np.int32)
-    sorted_facets = np.argsort(facet_indices)
-    facet_tag = meshtags(mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
 
     bottom_boundary_nodes = locate_dofs_geometrical(V, bottom_boundary)
-    top_boundary_nodes = locate_dofs_geometrical(V, top_boundary)
+    top_boundary_nodes_unordered = locate_dofs_geometrical(V, top_boundary)
 
-    # Define measure for top boundary facets
-    # top_boundary_facets = locate_entities_boundary(mesh, mesh.topology.dim-1, top_boundary) # Use locate_entities_boundary
-    # ds_top = Measure("ds", domain=mesh, subdomain_data=top_boundary_facets) # Measure on top boundary
+    # Order top boundary nodes from left to right
+    top_node_x_coords = np.array([mesh.geometry.x[node, 0] for node in top_boundary_nodes_unordered])
+    top_boundary_nodes_sorted_indices = np.argsort(top_node_x_coords)
+    top_boundary_nodes = top_boundary_nodes_unordered[top_boundary_nodes_sorted_indices]
 
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
@@ -68,23 +56,14 @@ def tct_elastic_reduced() -> None:
         value = amplitude * np.sin(omega * t)
         return Constant(mesh, np.array([0, value]))
     
-    def node_force_function(n, u, v):
+    def node_force_function(t, u, v):
         node_force_magnitudes = np.zeros((len(top_boundary_nodes), mesh.geometry.dim))
-        if n > 3000:
-            g = -1
-        else:
-            g = 1
-        for i in range(len(top_boundary_nodes)):
-            node_force_magnitudes[i, :] = [100000.0 * g, 5000.0]
+        sin_value = np.sin(omega * t)
+        value_y = - 500000 * sin_value
+        node_force_magnitudes[:, 1] = value_y
+        node_force_magnitudes[0, 0] = 50000 * sin_value
+        node_force_magnitudes[-1, 0] = -50000 * sin_value
         return node_force_magnitudes
-    
-    # def traction_function(t):
-    #     def traction_function_internal(x):
-    #         print(x)
-    #         traction_magnitude = 1000 + (t * 100)
-    #         traction_values = np.vstack((7 * x[1], 3 * x[0]))
-    #         return traction_values
-    #     return traction_function_internal
 
     def epsilon(u):
         return 0.5 * (grad(u) + grad(u).T)
@@ -97,8 +76,6 @@ def tct_elastic_reduced() -> None:
 
     f = Function(V)
     f.x.array[:] = 0.0
-
-    # traction_expr = Function(V)
 
     a = inner(sigma(u), epsilon(v)) * dx   # Use dx_ufl
     L_body = inner(f, v) * dx      # Use dx_ufl, body force part of L
@@ -126,26 +103,12 @@ def tct_elastic_reduced() -> None:
         # --- Node-dependent top boundary force ---
         force_vector = np.zeros(V.dofmap.index_map.size_global * V.dofmap.index_map_bs, dtype=np.float64) # Global force vector
 
-        node_force_magnitudes = node_force_function(step, u_k.x.array, velocity_k.x.array)
+        node_force_magnitudes = node_force_function(time, u_k.x.array, velocity_k.x.array)
         for i, dof in enumerate(top_boundary_nodes): # Use enumerate to get index 'i'
             node_force = node_force_magnitudes[i] # Force vector at node
 
-            # Add force to the global force vector at the correct DOF indices
-            global_dof_index_local = V.dofmap.index_map.local_to_global(np.array([dof], dtype=np.int32)) # Get global DOF index for the current node
-            dof_indices = np.array([global_dof_index_local]) # Wrap in numpy array for consistency
-            for j in range(V.dofmap.index_map_bs): # Iterate over block size (components of vector function space)
-                global_dof_index = dof_indices[0] * V.dofmap.index_map_bs + j # Calculate global index
-                local_range = V.dofmap.index_map.local_range
-                if local_range[0] <= global_dof_index < local_range[1]: # Check if current process owns this DOF
-                    local_dof_index = global_dof_index - local_range[0] # Calculate local index based on global index and local range
-                    force_vector[local_dof_index] += node_force[j] # Add force component
-
-
-        # --- Neumann term in linear form ---
-        # traction_expr.interpolate(traction_function(time))
-        # L_traction = inner(traction_expr, v) * ds_top  # Surface traction integral on top boundary
-        # L = L_body + L_traction # Total linear form is body force + traction
-        L = L_body
+            force_vector[2*dof] = node_force[0]
+            force_vector[2*dof+1] = node_force[1]
 
         # Bottom BC: Sinusoidal displacement (Time-dependent)
         bottom_displacement_expr = bottom_displacement_function(time)
@@ -155,7 +118,7 @@ def tct_elastic_reduced() -> None:
         current_bcs = [bc_bottom] # Only bottom BC now, top BC is force
 
         # Solve linear elasticity problem
-        problem = LinearProblem(a, L, bcs=current_bcs, u=u_k) # Use pre-assembled RHS b
+        problem = LinearProblem(a, L_body, bcs=current_bcs, u=u_k) # Use pre-assembled RHS b
         u_k = problem.solve(force_vector)
 
         velocity_k.x.array[:] = (u_k.x.array[:] - u_prev.x.array[:]) / dt
