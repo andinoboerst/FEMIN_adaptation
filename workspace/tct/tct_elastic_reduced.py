@@ -24,9 +24,9 @@ class Predictor:
         node_force_magnitudes = np.zeros(self.shape)
         sin_value = np.sin(self.omega * x[0])
         value_y = - 500000 * sin_value
-        node_force_magnitudes[:, 1] = value_y
-        node_force_magnitudes[0, 0] = 50000 * sin_value
-        node_force_magnitudes[-1, 0] = -50000 * sin_value
+        node_force_magnitudes[1::2] = value_y
+        node_force_magnitudes[0] = 50000 * sin_value
+        node_force_magnitudes[-2] = -50000 * sin_value
         return node_force_magnitudes
 
 
@@ -69,10 +69,6 @@ def tct_elastic_reduced():
     for i, node in enumerate(top_boundary_nodes):
         top_boundary_dofs[2*i:2*i+2] = [node * 2, node * 2 + 1]
 
-    # Define BCs ONCE and update values later
-    bc_top_values = np.array([0.0, 0.0], dtype=np.float64)
-    bc_top = dirichletbc(bc_top_values, top_boundary_nodes, V)
-
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
     frequency = 1000 # Hz, approx one cycle in 0.003s
@@ -83,7 +79,7 @@ def tct_elastic_reduced():
         value = amplitude * np.sin(omega * t)
         return Constant(mesh, np.array([0, value]))
     
-    predictor = Predictor(omega, (len(top_boundary_nodes), mesh.geometry.dim))
+    predictor = Predictor(omega, len(top_boundary_nodes) * mesh.geometry.dim)
 
 
     # 5. Variational Formulation (same as before)
@@ -129,13 +125,8 @@ def tct_elastic_reduced():
 
         force_vector = np.zeros(V.dofmap.index_map.size_global * V.dofmap.index_map_bs, dtype=np.float64) # Global force vector
 
-        # node_force_magnitudes = node_force_function(time, u_k.x.array, velocity_k.x.array)
         node_force_magnitudes = predictor.predict(time, u_k.x.array, v_k.x.array)
-        for i, dof in enumerate(top_boundary_nodes): # Use enumerate to get index 'i'
-            node_force = node_force_magnitudes[i] # Force vector at node
-
-            force_vector[2*dof] = node_force[0]
-            force_vector[2*dof+1] = node_force[1]
+        force_vector[top_boundary_dofs] = node_force_magnitudes
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
 

@@ -41,7 +41,14 @@ def tct_elastic_full():
 
     top_boundary_nodes = locate_dofs_geometrical(V, top_boundary)
     bottom_boundary_nodes = locate_dofs_geometrical(V, bottom_boundary)
-    interface_boundary_nodes = locate_dofs_geometrical(V, interface_boundary) # No sorting needed, we constrain both x and y
+    interface_boundary_nodes_unsorted = locate_dofs_geometrical(V, interface_boundary) # No sorting needed, we constrain both x and y
+
+    interface_node_x_coords = np.array([mesh.geometry.x[node, 0] for node in interface_boundary_nodes_unsorted])
+    interface_boundary_nodes_sorted_indices = np.argsort(interface_node_x_coords)
+    interface_boundary_nodes = interface_boundary_nodes_unsorted[interface_boundary_nodes_sorted_indices]
+    interface_boundary_dofs = np.zeros(len(interface_boundary_nodes) * 2, dtype=int)
+    for i, node in enumerate(interface_boundary_nodes):
+        interface_boundary_dofs[2*i:2*i+2] = [node * 2, node * 2 + 1]
 
     # Define BCs ONCE and update values later
     bc_top_values = np.array([0.0, 0.0], dtype=np.float64)
