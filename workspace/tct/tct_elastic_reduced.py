@@ -39,12 +39,12 @@ def tct_elastic_reduced() -> None:
         return np.isclose(x[1], 0.0)
 
     bottom_boundary_nodes = locate_dofs_geometrical(V, bottom_boundary)
-    top_boundary_nodes_unordered = locate_dofs_geometrical(V, top_boundary)
+    top_boundary_nodes_unsorted = locate_dofs_geometrical(V, top_boundary)
 
     # Order top boundary nodes from left to right
-    top_node_x_coords = np.array([mesh.geometry.x[node, 0] for node in top_boundary_nodes_unordered])
+    top_node_x_coords = np.array([mesh.geometry.x[node, 0] for node in top_boundary_nodes_unsorted])
     top_boundary_nodes_sorted_indices = np.argsort(top_node_x_coords)
-    top_boundary_nodes = top_boundary_nodes_unordered[top_boundary_nodes_sorted_indices]
+    top_boundary_nodes = top_boundary_nodes_unsorted[top_boundary_nodes_sorted_indices]
 
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
