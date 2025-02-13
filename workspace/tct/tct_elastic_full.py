@@ -23,7 +23,6 @@ def tct_elastic_full() -> None:
 
     # 2. Function Space
     V = functionspace(mesh, ("CG", 1, (2,)))
-    # W = functionspace(mesh, ("DG", 0, (2, 2)))
 
     # 3. Material Properties (Linear Elasticity)
     E = 200.0e3  # Young's modulus
@@ -85,14 +84,10 @@ def tct_elastic_full() -> None:
     num_steps = int(time_total / dt)
     time = 0.0
 
-    tdim = mesh.topology.dim
-
     # Initialize solution Function
     u_k = Function(V, name="Displacement")
     u_prev = Function(V) # Function to store displacement from previous time step
     velocity_k = Function(V, name="Velocity") # Function to store velocity
-    # sigma_h = Function(W)
-    # n = Constant(mesh, np.array([0.0, -1.0]))
 
     # Initialize u_prev to zero
     u_prev.x.array[:] = 0.0
@@ -119,29 +114,6 @@ def tct_elastic_full() -> None:
 
         velocity_k.x.array[:] = (u_k.x.array[:] - u_prev.x.array[:]) / dt
 
-        # --- Calculate Stress and Extract at x=25 (using INITIAL node locations) ---
-        # sigma_expr = sigma(u_k)
-        # sigma_project = form(inner(sigma_expr, TestFunction(W)) * dx)
-        # problem_stress = LinearProblem(form(inner(TestFunction(W), TrialFunction(W)) * dx), sigma_project, u=sigma_h)
-        # problem_stress.solve()
-
-        # T_interface = []
-        # print(f"\n--- Stress at Nodes initially at x=25 at Time {time:.5f} ---")
-        # for node_index in interface_boundary_nodes:
-        #     current_coords = mesh.geometry.x[node_index]
-        #     cells = locate_entities(mesh, tdim, interface_boundary)
-        #     stress_value = sigma_h.eval(current_coords, cells)
-        #     sigma_xx = stress_value[0]
-        #     sigma_yy = stress_value[3]
-        #     sigma_xy = stress_value[1]
-
-        #     t_x = sigma_xx * n.value[0] + sigma_xy * n.value[1]
-        #     t_y = sigma_xy * n.value[0] + sigma_yy * n.value[1]
-
-        #     T_interface.append([t_x, t_y])
-        
-        # print(T_interface)
-
         # Save DEFORMED MESH and fields
         if step % 100 == 0:
             u_full.append(u_k.x.array.copy())
@@ -153,12 +125,6 @@ def tct_elastic_full() -> None:
     print("Simulation complete")
 
     return vtk_mesh(mesh), u_full, v_full, interface_boundary_nodes
-
-    # with open("u_full.npy", "wb") as f:
-    #     np.save(f, u_full)
-
-    # with open("v_full.npy", "wb") as f:
-    #     np.save(f, v_full)
 
 
 if __name__ == "__main__":

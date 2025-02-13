@@ -10,6 +10,27 @@ from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, tr,
 from misc.progress_bar import progressbar
 
 
+class Predictor:
+    def __init__(self, omega, shape) -> None:
+        self.omega = omega
+        self.shape = shape
+
+    def predict(self, *args) -> np.ndarray:
+        return self._predict(self._format_variables(*args))
+
+    def _format_variables(self, t, u, v) -> np.ndarray:
+        return t, np.append(u, v)
+
+    def _predict(self, x) -> np.ndarray:
+        node_force_magnitudes = np.zeros(self.shape)
+        sin_value = np.sin(self.omega * x[0])
+        value_y = - 500000 * sin_value
+        node_force_magnitudes[:, 1] = value_y
+        node_force_magnitudes[0, 0] = 50000 * sin_value
+        node_force_magnitudes[-1, 0] = -50000 * sin_value
+        return node_force_magnitudes
+
+
 def tct_elastic_reduced() -> None:
     # 1. Domain and Mesh
     width = 100.0
@@ -56,14 +77,15 @@ def tct_elastic_reduced() -> None:
         value = amplitude * np.sin(omega * t)
         return Constant(mesh, np.array([0, value]))
     
-    def node_force_function(t, u, v):
-        node_force_magnitudes = np.zeros((len(top_boundary_nodes), mesh.geometry.dim))
-        sin_value = np.sin(omega * t)
-        value_y = - 500000 * sin_value
-        node_force_magnitudes[:, 1] = value_y
-        node_force_magnitudes[0, 0] = 50000 * sin_value
-        node_force_magnitudes[-1, 0] = -50000 * sin_value
-        return node_force_magnitudes
+    predictor = Predictor(omega, (len(top_boundary_nodes), mesh.geometry.dim))
+    # def node_force_function(t, u, v):
+    #     node_force_magnitudes = np.zeros((len(top_boundary_nodes), mesh.geometry.dim))
+    #     sin_value = np.sin(omega * t)
+    #     value_y = - 500000 * sin_value
+    #     node_force_magnitudes[:, 1] = value_y
+    #     node_force_magnitudes[0, 0] = 50000 * sin_value
+    #     node_force_magnitudes[-1, 0] = -50000 * sin_value
+    #     return node_force_magnitudes
 
     def epsilon(u):
         return 0.5 * (grad(u) + grad(u).T)
@@ -103,7 +125,8 @@ def tct_elastic_reduced() -> None:
         # --- Node-dependent top boundary force ---
         force_vector = np.zeros(V.dofmap.index_map.size_global * V.dofmap.index_map_bs, dtype=np.float64) # Global force vector
 
-        node_force_magnitudes = node_force_function(time, u_k.x.array, velocity_k.x.array)
+        # node_force_magnitudes = node_force_function(time, u_k.x.array, velocity_k.x.array)
+        node_force_magnitudes = predictor.predict(time, u_k.x.array, velocity_k.x.array)
         for i, dof in enumerate(top_boundary_nodes): # Use enumerate to get index 'i'
             node_force = node_force_magnitudes[i] # Force vector at node
 
