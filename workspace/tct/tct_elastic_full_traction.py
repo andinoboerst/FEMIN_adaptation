@@ -1,10 +1,10 @@
 import numpy as np
 from mpi4py import MPI
-from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
-from dolfinx.mesh import create_rectangle, CellType
+from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical, assemble_scalar, form
+from dolfinx.mesh import create_rectangle, CellType, meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem
-from ufl import TestFunction, TrialFunction, Identity, grad, inner, tr, dx
+from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx, FacetNormal
 
 from misc.progress_bar import progressbar  # Assuming this is available
 
@@ -19,9 +19,18 @@ def tct_elastic_full():
 
     mesh = create_rectangle(MPI.COMM_WORLD, cell_type=CellType.quadrilateral,
                             points=((0.0, 0.0), (width, height)), n=(nx, ny))
+    
+    mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+    # mesh.topology.create_connectivity(mesh.topology.dim, mesh.topology.dim - 1)
+    mesh_connectivity = mesh.topology.connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+    # facet_connectivity = mesh.topology.connectivity(mesh.topology.dim, mesh.topology.dim - 1)
 
     # 2. Function Space (same as before)
     V = functionspace(mesh, ("CG", 1, (2,)))
+    W = functionspace(mesh, ("DG", 0, (2,2)))  # Or ("CG", 1) if you want continuous stress
+    sigma_projected = Function(W)
+    w = TestFunction(W)
+    tau = TrialFunction(W)
 
     # 3. Material Properties (same as before)
     E = 200.0e3
@@ -41,14 +50,21 @@ def tct_elastic_full():
 
     top_boundary_nodes = locate_dofs_geometrical(V, top_boundary)
     bottom_boundary_nodes = locate_dofs_geometrical(V, bottom_boundary)
-    interface_boundary_nodes_unsorted = locate_dofs_geometrical(V, interface_boundary) # No sorting needed, we constrain both x and y
+    interface_nodes_unsorted = locate_dofs_geometrical(V, interface_boundary) # No sorting needed, we constrain both x and y
 
-    interface_node_x_coords = np.array([mesh.geometry.x[node, 0] for node in interface_boundary_nodes_unsorted])
-    interface_boundary_nodes_sorted_indices = np.argsort(interface_node_x_coords)
-    interface_boundary_nodes = interface_boundary_nodes_unsorted[interface_boundary_nodes_sorted_indices]
-    interface_boundary_dofs = np.zeros(len(interface_boundary_nodes) * 2, dtype=int)
-    for i, node in enumerate(interface_boundary_nodes):
-        interface_boundary_dofs[2*i:2*i+2] = [node * 2, node * 2 + 1]
+    interface_node_x_coords = np.array([mesh.geometry.x[node, 0] for node in interface_nodes_unsorted])
+    interface_nodes_sorted_indices = np.argsort(interface_node_x_coords)
+    interface_nodes = interface_nodes_unsorted[interface_nodes_sorted_indices]
+    interface_dofs = np.zeros(len(interface_nodes) * 2, dtype=int)
+    for i, node in enumerate(interface_nodes):
+        interface_dofs[2*i:2*i+2] = [node * 2, node * 2 + 1]
+
+    interface_nodes_cells = [mesh_connectivity.links(node) for node in interface_nodes]
+    interface_nodes_coords = mesh.geometry.x[interface_nodes]
+
+    # interface_entities = locate_entities(mesh, 1, interface_boundary)
+    # interface_entities.sort()
+    # interface_meshtags = meshtags(mesh, 1, interface_entities, np.full(len(interface_entities), 88, dtype=np.int32))
 
     # Define BCs ONCE and update values later
     bc_top_values = np.array([0.0, 0.0], dtype=np.float64)
@@ -101,8 +117,13 @@ def tct_elastic_full():
     u_pred = Function(V)  # Now a Function object
     v_pred = Function(V)  # Now a Function object
 
+    # Define measure on the interface (ds)
+    # ds = Measure("ds", domain=mesh, subdomain_id=88, subdomain_data=interface_meshtags)
+
     u_full = []
     v_full = []
+    t_full = []
+    t_interface = []
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -125,10 +146,66 @@ def tct_elastic_full():
         a_k.x.array[:] = (1/(beta*dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1-2*beta)/(2*beta)) * a_prev.x.array[:]
         v_k.x.array[:] = v_pred.x.array[:] + dt*gamma*a_k.x.array[:] + dt*(1-gamma)*a_prev.x.array[:]
 
+       # Project the stress to the function space W
+        sigma_expr = sigma(u_k)
+        
+        # Define the *bilinear* and *linear* forms for the projection
+        a_proj = inner(tau, w) * dx  # Bilinear form
+        L_proj = inner(sigma_expr, w) * dx  # Linear form (same as bilinear in this L2 projection case)
+
+        problem_stress = LinearProblem(a_proj, L_proj, u=sigma_projected) # u=sigma_projected sets sigma_projected as the solution
+        problem_stress.solve()
+
+
+        # Calculate traction at the interface (Corrected and Efficient)
+        # traction_x = np.zeros(len(interface_nodes))  # Pre-allocate for efficiency
+        # traction_y = np.zeros(len(interface_nodes))
+
+        # traction = np.zeros(len(interface_nodes)*2)
+        traction = np.zeros(len(u_k.x.array))
+
+        # n = FacetNormal(mesh)
+        # traction_vector = dot(sigma_projected, n)
+
+        # for i, (coord, cells) in enumerate(zip(interface_nodes_coords, interface_nodes_cells)):
+        for node, coord in enumerate(mesh.geometry.x):
+            # cell = cells[0] # Current cell
+
+            cells = mesh_connectivity.links(node)
+
+            sigma_eval = 0
+
+            for cell in cells:
+                sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
+
+            sigma_eval /= len(cells)
+
+            traction[2*node] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+            traction[2*node+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+
+            # facets = facet_connectivity.links(cell)
+
+            # # Find the facet that is part of the interface (marked with 1)
+            # for facet in facets:
+            #   if facet in interface_meshtags.indices:
+            #     facet_object = mesh.topology.connectivity(1, 0).links(facet)
+            #     for vertex in facet_object:
+            #         print(mesh.geometry.x[vertex])
+            #     traction_x[i] = assemble_scalar(form(traction_vector[0] * ds(facet)))
+            #     traction_y[i] = assemble_scalar(form(traction_vector[1] * ds(facet)))
+            #     break # Exit after finding correct facet
+
+            # Calculate traction by integrating over the facet
+            # traction_x[i] = assemble_scalar(form(traction_vector[0] * ds(cell)))
+            # traction_y[i] = assemble_scalar(form(traction_vector[1] * ds(cell)))
+
 
         if step % 100 == 0:
             u_full.append(u_k.x.array.copy())
             v_full.append(v_k.x.array.copy())
+            t_full.append(traction)
+        
+        t_interface.append(traction[interface_dofs])
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
@@ -136,7 +213,7 @@ def tct_elastic_full():
         a_prev.x.array[:] = a_k.x.array[:]
 
     print("Simulation complete")
-    return vtk_mesh(mesh), u_full, v_full, interface_boundary_nodes
+    return vtk_mesh(mesh), u_full, v_full, t_full, t_interface, interface_nodes
 
 
 if __name__ == "__main__":
