@@ -3,7 +3,7 @@ from tct.tct_elastic import tct_elastic_generate_u_interface
 
 
 def generate_training_set():
-    frequency_range = range(500, 2000, int(1500/20))
+    frequency_range = range(500, 2000, int(1500/10))
 
     training_in = []
     training_out = []
@@ -14,10 +14,10 @@ def generate_training_set():
         training_in.append(t)
         training_out.append(u)
 
-    with open("./training_in.npy", "wb") as f:
+    with open("./training_in_v2.npy", "wb") as f:
         np.save(f, np.array(training_in))
 
-    with open("./training_out.npy", "wb") as f:
+    with open("./training_out_v2.npy", "wb") as f:
         np.save(f, np.array(training_out))
 
 

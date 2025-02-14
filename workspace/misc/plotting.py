@@ -60,6 +60,7 @@ def create_mesh_animation(mesh, scalars=None, vectors=None, name: str="result", 
     grid_base['scalars'] = scalars[0]
     grid_base.set_active_scalars('scalars')
     grid_base['vectors'] = vectors[0]
+    grid_base.set_active_vectors('vectors')
     grid = grid_base.warp_by_vector()
 
 

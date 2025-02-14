@@ -216,8 +216,8 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
     for i, node in enumerate(top_boundary_nodes):
         top_boundary_dofs[2*i:2*i+2] = [node * 2, node * 2 + 1]
 
-    top_boundary_nodes_cells = [mesh_connectivity.links(node) for node in interface_nodes]
-    top_boundary_nodes_coords = mesh.geometry.x[interface_nodes]
+    top_boundary_nodes_cells = [mesh_connectivity.links(node) for node in top_boundary_nodes]
+    top_boundary_nodes_coords = mesh.geometry.x[top_boundary_nodes]
 
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
@@ -243,7 +243,8 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
     L = inner(f, v) * dx
 
     # 6. Time Stepping (Newmark-beta)
-    time_total = 3e-3
+    # time_total = 3e-3
+    time_total = 1e-3
     dt = 5e-7
     num_steps = int(time_total / dt)
     time = 0.0
@@ -297,7 +298,7 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
             traction[2*i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
             traction[2*i+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
-        u_top.x.array[top_boundary_dofs] = predictor.predict(traction)
+        u_top.x.array[top_boundary_dofs] = predictor.predict([traction])[0]
         bc_top = dirichletbc(u_top, top_boundary_nodes)
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
