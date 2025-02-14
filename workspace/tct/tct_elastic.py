@@ -133,7 +133,6 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
 
         traction = np.zeros(len(interface_dofs))
 
-        # for node, coord in enumerate(mesh.geometry.x):
         for i, (coord, cells) in enumerate(zip(interface_nodes_coords, interface_nodes_cells)):
             sigma_eval = 0
 
@@ -142,8 +141,11 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
 
             sigma_eval /= len(cells)
 
-            traction[2*node] = sigma_eval[0] * 0 - sigma_eval[1] * 5
-            traction[2*node+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+            traction[2*i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+            traction[2*i+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+
+        u_interface[step, :] = u_k.x.array[interface_dofs]
+        tr_interface[step, :] = traction
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -158,9 +160,6 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
         # Corrector step
         a_k.x.array[:] = (1/(beta*dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1-2*beta)/(2*beta)) * a_prev.x.array[:]
         v_k.x.array[:] = v_pred.x.array[:] + dt*gamma*a_k.x.array[:] + dt*(1-gamma)*a_prev.x.array[:]
-        
-        u_interface[step, :] = u_k.x.array[interface_dofs]
-        tr_interface[step, :] = traction
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
@@ -295,8 +294,8 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
 
             sigma_eval /= len(cells)
 
-            traction[2*node] = sigma_eval[0] * 0 - sigma_eval[1] * 5
-            traction[2*node+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+            traction[2*i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+            traction[2*i+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
         u_top.x.array[top_boundary_dofs] = predictor.predict(traction)
         bc_top = dirichletbc(u_top, top_boundary_nodes)
