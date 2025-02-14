@@ -19,9 +19,16 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
 
     mesh = create_rectangle(MPI.COMM_WORLD, cell_type=CellType.quadrilateral,
                             points=((0.0, 0.0), (width, height)), n=(nx, ny))
+    
+    mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+    mesh_connectivity = mesh.topology.connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 
     # 2. Function Space (same as before)
     V = functionspace(mesh, ("CG", 1, (2,)))
+    W = functionspace(mesh, ("DG", 0, (2,2)))  # Or ("CG", 1) if you want continuous stress
+    sigma_projected = Function(W)
+    w = TestFunction(W)
+    tau = TrialFunction(W)
 
     # 3. Material Properties (same as before)
     E = 200.0e3
@@ -50,13 +57,15 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
     for i, node in enumerate(interface_nodes):
         interface_dofs[2*i:2*i+2] = [node * 2, node * 2 + 1]
 
+    interface_nodes_cells = [mesh_connectivity.links(node) for node in interface_nodes]
+    interface_nodes_coords = mesh.geometry.x[interface_nodes]
+
     # Define BCs ONCE and update values later
     bc_top_values = np.array([0.0, 0.0], dtype=np.float64)
     bc_top = dirichletbc(bc_top_values, top_boundary_nodes, V)
 
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
-    # frequency = 1000 # Hz, approx one cycle in 0.003s
     omega = 2 * np.pi * frequency
 
     # Define displacement function for bottom boundary - will be updated in time loop
@@ -91,7 +100,8 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
     a_k = Function(V, name="Acceleration")
     a_prev = Function(V)
 
-    # Initialize acceleration to zero
+    # Initialize displacement and acceleration to zero
+    u_k.x.array[:] = 0.0
     a_prev.x.array[:] = 0.0  # Important initialization
 
     beta = 0.25  # Newmark-beta parameter
@@ -101,9 +111,8 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
     u_pred = Function(V)  # Now a Function object
     v_pred = Function(V)  # Now a Function object
 
-    u_full = []
-    v_full = []
-    u_interface = []
+    u_interface = np.zeros((num_steps, len(interface_dofs)))
+    tr_interface = np.zeros((num_steps, len(interface_dofs)))
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -111,6 +120,30 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
 
         # Update current boundary conditions
         current_bcs = [bc_top, bc_bottom]
+
+        # Project the stress to the function space W
+        sigma_expr = sigma(u_k)
+        
+        # Define the *bilinear* and *linear* forms for the projection
+        a_proj = inner(tau, w) * dx  # Bilinear form
+        L_proj = inner(sigma_expr, w) * dx  # Linear form (same as bilinear in this L2 projection case)
+
+        problem_stress = LinearProblem(a_proj, L_proj, u=sigma_projected) # u=sigma_projected sets sigma_projected as the solution
+        problem_stress.solve()
+
+        traction = np.zeros(len(interface_dofs))
+
+        # for node, coord in enumerate(mesh.geometry.x):
+        for i, (coord, cells) in enumerate(zip(interface_nodes_coords, interface_nodes_cells)):
+            sigma_eval = 0
+
+            for cell in cells:
+                sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
+
+            sigma_eval /= len(cells)
+
+            traction[2*node] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+            traction[2*node+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -125,13 +158,9 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
         # Corrector step
         a_k.x.array[:] = (1/(beta*dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1-2*beta)/(2*beta)) * a_prev.x.array[:]
         v_k.x.array[:] = v_pred.x.array[:] + dt*gamma*a_k.x.array[:] + dt*(1-gamma)*a_prev.x.array[:]
-
-
-        if step % 100 == 0:
-            u_full.append(u_k.x.array.copy())
-            v_full.append(v_k.x.array.copy())
         
-        u_interface.append(u_k.x.array[interface_dofs])
+        u_interface[step, :] = u_k.x.array[interface_dofs]
+        tr_interface[step, :] = traction
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
@@ -139,10 +168,10 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
         a_prev.x.array[:] = a_k.x.array[:]
 
     print("Simulation complete")
-    return u_interface
+    return u_interface, tr_interface
 
 
-def tct_elastic_apply_u_interface(predictor):
+def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
     # 1. Domain and Mesh (same as before)
     width = 100.0
     height = 25.0
@@ -153,9 +182,16 @@ def tct_elastic_apply_u_interface(predictor):
 
     mesh = create_rectangle(MPI.COMM_WORLD, cell_type=CellType.quadrilateral,
                             points=((0.0, 0.0), (width, height)), n=(nx, ny))
+    
+    mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
+    mesh_connectivity = mesh.topology.connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 
     # 2. Function Space (same as before)
     V = functionspace(mesh, ("CG", 1, (2,)))
+    W = functionspace(mesh, ("DG", 0, (2,2)))  # Or ("CG", 1) if you want continuous stress
+    sigma_projected = Function(W)
+    w = TestFunction(W)
+    tau = TrialFunction(W)
 
     # 3. Material Properties (same as before)
     E = 200.0e3
@@ -180,6 +216,9 @@ def tct_elastic_apply_u_interface(predictor):
     top_boundary_dofs = np.zeros(len(top_boundary_nodes) * 2, dtype=int)
     for i, node in enumerate(top_boundary_nodes):
         top_boundary_dofs[2*i:2*i+2] = [node * 2, node * 2 + 1]
+
+    top_boundary_nodes_cells = [mesh_connectivity.links(node) for node in interface_nodes]
+    top_boundary_nodes_coords = mesh.geometry.x[interface_nodes]
 
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
@@ -219,7 +258,8 @@ def tct_elastic_apply_u_interface(predictor):
 
     u_top = Function(V, name="InterfaceBC")
 
-    # Initialize acceleration to zero
+    # Initialize displacement and acceleration to zero
+    u_k.x.array[:] = 0.0
     a_prev.x.array[:] = 0.0  # Important initialization
 
     beta = 0.25  # Newmark-beta parameter
@@ -234,10 +274,34 @@ def tct_elastic_apply_u_interface(predictor):
     for step in progressbar(range(num_steps)):
         time += dt
 
-        bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
+        # Project the stress to the function space W
+        sigma_expr = sigma(u_k)
+        
+        # Define the *bilinear* and *linear* forms for the projection
+        a_proj = inner(tau, w) * dx  # Bilinear form
+        L_proj = inner(sigma_expr, w) * dx  # Linear form (same as bilinear in this L2 projection case)
 
-        u_top.x.array[top_boundary_dofs] = predictor(u_k.x.array[top_boundary_dofs], )
+        problem_stress = LinearProblem(a_proj, L_proj, u=sigma_projected) # u=sigma_projected sets sigma_projected as the solution
+        problem_stress.solve()
+
+        traction = np.zeros(len(top_boundary_dofs))
+
+        # for node, coord in enumerate(mesh.geometry.x):
+        for i, (coord, cells) in enumerate(zip(top_boundary_nodes_coords, top_boundary_nodes_cells)):
+            sigma_eval = 0
+
+            for cell in cells:
+                sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
+
+            sigma_eval /= len(cells)
+
+            traction[2*node] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+            traction[2*node+1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+
+        u_top.x.array[top_boundary_dofs] = predictor.predict(traction)
         bc_top = dirichletbc(u_top, top_boundary_nodes)
+
+        bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
 
         # Update current boundary conditions
         current_bcs = [bc_bottom, bc_top]
