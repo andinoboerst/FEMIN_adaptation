@@ -5,7 +5,7 @@ RUN apt-get update && \
 
 RUN apt-get install --fix-missing -y xvfb
 
-RUN pip install matplotlib pyvista[jupyter] trame trame-vtk jupyter imageio imageio[ffmpeg]
+RUN pip install matplotlib pyvista[jupyter] trame trame-vtk jupyter imageio imageio[ffmpeg] scikit-learn
 
 # Set the working directory to /workspace
 WORKDIR /workspace
