@@ -40,8 +40,8 @@ def train_predictor(version: int = 1) -> None:
     with open(f"{DATA_FOLDER}/training_out_v{version:02}.npy", "rb") as f:
         training_out = np.load(f)
 
-    training_in = training_in.reshape(-1, 42)
-    training_out = training_out.reshape(-1, 42)
+    training_in = training_in.reshape(-1, training_in.shape[-1])
+    training_out = training_out.reshape(-1, training_out.shape[-1])
 
     X_train, X_test, y_train, y_test = train_test_split(
         training_in, training_out, test_size=0.2, random_state=13
@@ -54,6 +54,8 @@ def train_predictor(version: int = 1) -> None:
         "learning_rate": 0.01,
         "loss": "squared_error",
     }
+
+    print("Fitting data to predictor model...")
 
     reg = MultiOutputRegressor(ensemble.GradientBoostingRegressor(**params), n_jobs=5)
     reg.fit(X_train, y_train)
