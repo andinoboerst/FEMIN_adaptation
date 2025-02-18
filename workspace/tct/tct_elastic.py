@@ -385,6 +385,9 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     def bottom_boundary(x):
         return np.isclose(x[1], 0.0)
 
+    def bottom_half_real(x):
+        return x[1] <= 25.4
+
     top_boundary_nodes_unsorted_pred = locate_dofs_geometrical(V_pred, top_boundary_pred)
     bottom_boundary_nodes_pred = locate_dofs_geometrical(V_pred, bottom_boundary)
 
@@ -404,7 +407,8 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
 
     top_boundary_nodes_real = locate_dofs_geometrical(V_real, top_boundary_real)
     bottom_boundary_nodes_real = locate_dofs_geometrical(V_real, bottom_boundary)
-    interface_nodes_unsorted_real = locate_dofs_geometrical(V_real, interface_boundary)  # No sorting needed, we constrain both x and y
+    interface_nodes_unsorted_real = locate_dofs_geometrical(V_real, interface_boundary)
+    bottom_half_nodes_real = locate_dofs_geometrical(V_real, bottom_half_real)
 
     interface_node_x_coords_real = np.array([mesh_real.geometry.x[node, 0] for node in interface_nodes_unsorted_real])
     interface_nodes_sorted_indices_real = np.argsort(interface_node_x_coords_real)
@@ -587,7 +591,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
         u_k_real = problem_real.solve()
 
         # Corrector step
-        a_k_real.x.array[:] = (1 / (beta * dt**2)) * (u_k_real.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev_real.x.array[:]
+        a_k_real.x.array[:] = (1 / (beta * dt**2)) * (u_k_real.x.array[:] - u_temp_real.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev_real.x.array[:]
         v_k_real.x.array[:] = v_temp_real.x.array[:] + dt * gamma * a_k_real.x.array[:] + dt * (1 - gamma) * a_prev_real.x.array[:]
 
         # Update previous values
@@ -595,7 +599,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
         v_prev_real.x.array[:] = v_k_real.x.array[:]
         a_prev_real.x.array[:] = a_k_real.x.array[:]
 
-        prediction_error.append(u_k_real.x.array[interface_dofs_real] - u_k_pred.x.array[top_boundary_dofs_pred])
+        prediction_error.append(abs(u_k_real.x.array[interface_dofs_real] - u_k_pred.x.array[top_boundary_dofs_pred]).mean())
 
 
         if step % 100 == 0:
@@ -605,7 +609,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
             v_full_real.append(v_k_real.x.array.copy())
 
     print("Simulation complete")
-    return vtk_mesh(mesh_pred), u_full_pred, v_full_pred, vtk_mesh(mesh_real), u_full_real, v_full_real, prediction_error
+    return vtk_mesh(mesh_pred), u_full_pred, v_full_pred, vtk_mesh(mesh_real), u_full_real, v_full_real, prediction_error, bottom_half_nodes_real
 
 
 if __name__ == "__main__":
