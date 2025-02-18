@@ -144,7 +144,6 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
             traction[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
             traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
-        u_interface[step, :] = u_k.x.array[interface_dofs]
         tr_interface[step, :] = traction
 
         # Solve using Newmark-beta
@@ -160,6 +159,8 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
         # Corrector step
         a_k.x.array[:] = (1 / (beta * dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev.x.array[:]
         v_k.x.array[:] = v_pred.x.array[:] + dt * gamma * a_k.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
+
+        u_interface[step, :] = u_k.x.array[interface_dofs]
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
@@ -307,7 +308,7 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
-        u_pred.x.array[:] = u_prev.x.array[:] + dt * v_prev.x.array[:] + 0.5 * dt**2 * (1-2*beta) * a_prev.x.array[:]
+        u_pred.x.array[:] = u_prev.x.array[:] + dt * v_prev.x.array[:] + 0.5 * dt**2 * (1 - 2 * beta) * a_prev.x.array[:]
         v_pred.x.array[:] = v_prev.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
 
         # Solve for acceleration (using u_pred as initial guess)
