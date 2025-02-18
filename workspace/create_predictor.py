@@ -1,5 +1,6 @@
 import numpy as np
 import pickle
+import os
 
 from sklearn import ensemble
 from sklearn.metrics import mean_squared_error
@@ -54,7 +55,7 @@ def train_predictor(version: int = 1) -> None:
         "loss": "squared_error",
     }
 
-    reg = MultiOutputRegressor(ensemble.GradientBoostingRegressor(**params), n_jobs=-1)
+    reg = MultiOutputRegressor(ensemble.GradientBoostingRegressor(**params), n_jobs=5)
     reg.fit(X_train, y_train)
 
     mse = mean_squared_error(y_test, reg.predict(X_test))
@@ -91,5 +92,12 @@ if __name__ == "__main__":
     version = 4
     frequency = 1000
     simulate_only = False
+
+    try:
+        os.mkdir(DATA_FOLDER)
+    except FileExistsError:
+        print("Folder already exists.")
+
+    # train_predictor(version)
     
     run(version, frequency, simulate_only)

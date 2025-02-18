@@ -26,7 +26,7 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
 
     # 2. Function Space (same as before)
     V = functionspace(mesh, ("CG", 1, (2,)))
-    W = functionspace(mesh, ("DG", 0, (2, 2)))  # Or ("CG", 1) if you want continuous stress
+    W = functionspace(mesh, ("CG", 1, (2, 2)))  # Or ("CG", 1) if you want continuous stress
     sigma_projected = Function(W)
     w = TestFunction(W)
     tau = TrialFunction(W)
@@ -88,7 +88,8 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
     L = inner(f, v) * dx
 
     # 6. Time Stepping (Newmark-beta)
-    time_total = 3e-3
+    # time_total = 3e-3
+    time_total = 1e-3
     dt = 5e-7
     num_steps = int(time_total / dt)
     time = 0.0
@@ -112,7 +113,7 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
     v_pred = Function(V)  # Now a Function object
 
     u_interface = np.zeros((num_steps, len(interface_dofs)))
-    tr_interface = np.zeros((num_steps, len(interface_dofs)))
+    tr_interface = np.zeros((num_steps, len(interface_nodes) * 3))
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -131,20 +132,29 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
         problem_stress = LinearProblem(a_proj, L_proj, u=sigma_projected)  # u=sigma_projected sets sigma_projected as the solution
         problem_stress.solve()
 
-        traction = np.zeros(len(interface_dofs))
+        interface_node_stress = np.zeros(len(interface_nodes) * 3)
 
-        for i, (coord, cells) in enumerate(zip(interface_nodes_coords, interface_nodes_cells)):
-            sigma_eval = 0
+        for i, node in enumerate(interface_nodes):
+            interface_node_stress[3 * i] = sigma_projected.x.array[4 * node]
+            interface_node_stress[3 * i + 1] = sigma_projected.x.array[4 * node + 1]
+            interface_node_stress[3 * i + 2] = sigma_projected.x.array[4 * node + 3]
 
-            for cell in cells:
-                sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
 
-            sigma_eval /= len(cells)
+        # traction = np.zeros(len(interface_dofs))
 
-            traction[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
-            traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+        # for i, (coord, cells) in enumerate(zip(interface_nodes_coords, interface_nodes_cells)):
+            # sigma_eval = 0
 
-        tr_interface[step, :] = traction
+            # for cell in cells:
+            #     sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
+
+            # sigma_eval /= len(cells)
+
+            # traction[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+            # traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+
+
+        tr_interface[step, :] = interface_node_stress
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -160,7 +170,7 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
         a_k.x.array[:] = (1 / (beta * dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev.x.array[:]
         v_k.x.array[:] = v_pred.x.array[:] + dt * gamma * a_k.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
 
-        u_interface[step, :] = u_k.x.array[interface_dofs]
+        u_interface[step, :] = u_k.x.array[interface_dofs] - u_prev.x.array[interface_dofs]
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
@@ -188,7 +198,7 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
 
     # 2. Function Space (same as before)
     V = functionspace(mesh, ("CG", 1, (2,)))
-    W = functionspace(mesh, ("DG", 0, (2, 2)))  # Or ("CG", 1) if you want continuous stress
+    W = functionspace(mesh, ("CG", 1, (2, 2)))  # Or ("CG", 1) if you want continuous stress
     sigma_projected = Function(W)
     w = TestFunction(W)
     tau = TrialFunction(W)
@@ -284,21 +294,28 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
         problem_stress = LinearProblem(a_proj, L_proj, u=sigma_projected)  # u=sigma_projected sets sigma_projected as the solution
         problem_stress.solve()
 
-        traction = np.zeros(len(top_boundary_dofs))
+        # traction = np.zeros(len(top_boundary_dofs))
 
-        # for node, coord in enumerate(mesh.geometry.x):
-        for i, (coord, cells) in enumerate(zip(top_boundary_nodes_coords, top_boundary_nodes_cells)):
-            sigma_eval = 0
+        # # for node, coord in enumerate(mesh.geometry.x):
+        # for i, (coord, cells) in enumerate(zip(top_boundary_nodes_coords, top_boundary_nodes_cells)):
+        #     sigma_eval = 0
 
-            for cell in cells:
-                sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
+        #     for cell in cells:
+        #         sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
 
-            sigma_eval /= len(cells)
+        #     sigma_eval /= len(cells)
 
-            traction[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
-            traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+        #     traction[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+        #     traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
-        u_top.x.array[top_boundary_dofs] = predictor.predict([traction])[0]
+        interface_node_stress = np.zeros(len(interface_nodes) * 3)
+
+        for i, node in enumerate(interface_nodes):
+            interface_node_stress[3 * i] = sigma_projected.x.array[4 * node]
+            interface_node_stress[3 * i + 1] = sigma_projected.x.array[4 * node + 1]
+            interface_node_stress[3 * i + 2] = sigma_projected.x.array[4 * node + 3]
+
+        u_top.x.array[top_boundary_dofs] = u_prev.x.array[top_boundary_dofs] + predictor.predict([interface_node_stress])[0]
         bc_top = dirichletbc(u_top, top_boundary_nodes)
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
@@ -513,21 +530,28 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
         problem_stress_pred = LinearProblem(a_proj_pred, L_proj_pred, u=sigma_projected_pred)  # u=sigma_projected sets sigma_projected as the solution
         problem_stress_pred.solve()
 
-        traction_pred = np.zeros(len(top_boundary_dofs_pred))
+        # traction_pred = np.zeros(len(top_boundary_dofs_pred))
 
-        # for node, coord in enumerate(mesh.geometry.x):
-        for i, (coord, cells) in enumerate(zip(top_boundary_nodes_coords_pred, top_boundary_nodes_cells_pred)):
-            sigma_eval = 0
+        # # for node, coord in enumerate(mesh.geometry.x):
+        # for i, (coord, cells) in enumerate(zip(top_boundary_nodes_coords_pred, top_boundary_nodes_cells_pred)):
+        #     sigma_eval = 0
 
-            for cell in cells:
-                sigma_eval += sigma_projected_pred.eval(coord, cell)  # Evaluate at each coordinate in its cell
+        #     for cell in cells:
+        #         sigma_eval += sigma_projected_pred.eval(coord, cell)  # Evaluate at each coordinate in its cell
 
-            sigma_eval /= len(cells)
+        #     sigma_eval /= len(cells)
 
-            traction_pred[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
-            traction_pred[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+        #     traction_pred[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+        #     traction_pred[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
-        u_top_pred.x.array[top_boundary_dofs_pred] = predictor.predict([traction_pred])[0]
+        interface_node_stress_pred = np.zeros(len(top_boundary_nodes_pred) * 3)
+
+        for i, node in enumerate(top_boundary_nodes_pred):
+            interface_node_stress_pred[3 * i] = sigma_projected_pred.x.array[4 * node]
+            interface_node_stress_pred[3 * i + 1] = sigma_projected_pred.x.array[4 * node + 1]
+            interface_node_stress_pred[3 * i + 2] = sigma_projected_pred.x.array[4 * node + 3]
+
+        u_top_pred.x.array[top_boundary_dofs_pred] = u_k_pred.x.array[top_boundary_dofs_pred] + predictor.predict([interface_node_stress_pred])[0]
         bc_top_pred = dirichletbc(u_top_pred, top_boundary_nodes_pred)
 
         # Update current boundary conditions
@@ -567,18 +591,25 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
         problem_stress_real = LinearProblem(a_proj_real, L_proj_real, u=sigma_projected_real)  # u=sigma_projected sets sigma_projected as the solution
         problem_stress_real.solve()
 
-        traction_real = np.zeros(len(interface_dofs_real))
+        # traction_real = np.zeros(len(interface_dofs_real))
 
-        for i, (coord, cells) in enumerate(zip(interface_nodes_coords_real, interface_nodes_cells_real)):
-            sigma_eval = 0
+        # for i, (coord, cells) in enumerate(zip(interface_nodes_coords_real, interface_nodes_cells_real)):
+        #     sigma_eval = 0
 
-            for cell in cells:
-                sigma_eval += sigma_projected_real.eval(coord, cell)  # Evaluate at each coordinate in its cell
+        #     for cell in cells:
+        #         sigma_eval += sigma_projected_real.eval(coord, cell)  # Evaluate at each coordinate in its cell
 
-            sigma_eval /= len(cells)
+        #     sigma_eval /= len(cells)
 
-            traction_real[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
-            traction_real[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+        #     traction_real[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
+        #     traction_real[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
+
+        interface_node_stress_real = np.zeros(len(interface_nodes_real) * 3)
+
+        for i, node in enumerate(interface_nodes_real):
+            interface_node_stress_real[3 * i] = sigma_projected_real.x.array[4 * node]
+            interface_node_stress_real[3 * i + 1] = sigma_projected_real.x.array[4 * node + 1]
+            interface_node_stress_real[3 * i + 2] = sigma_projected_real.x.array[4 * node + 3]
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
