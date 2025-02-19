@@ -117,6 +117,22 @@ def tct_elastic_generate(frequency: int = 1000):
         # Update current boundary conditions
         current_bcs = [bc_top, bc_bottom]
 
+        u_interface[step, :] = u_k.x.array[interface_dofs] - u_prev.x.array[interface_dofs]
+
+        # Solve using Newmark-beta
+        # Predictor step (using Function objects)
+        u_pred.x.array[:] = u_prev.x.array[:] + dt * v_prev.x.array[:] + 0.5 * dt**2 * (1 - 2 * beta) * a_prev.x.array[:]
+        v_pred.x.array[:] = v_prev.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
+
+        # Solve for acceleration (using u_pred as initial guess)
+        u_k.x.array[:] = u_pred.x.array[:]  # Set initial guess for the solver
+        problem = LinearProblem(a, L, bcs=current_bcs, u=u_k)
+        u_k = problem.solve()
+
+        # Corrector step
+        a_k.x.array[:] = (1 / (beta * dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev.x.array[:]
+        v_k.x.array[:] = v_pred.x.array[:] + dt * gamma * a_k.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
+
         # Project the stress to the function space W
         sigma_expr = sigma(u_k)
 
@@ -141,22 +157,6 @@ def tct_elastic_generate(frequency: int = 1000):
 
         f_interface[step, :] = interface_node_forces - f_interface_prev
         f_interface_prev = interface_node_forces
-
-        # Solve using Newmark-beta
-        # Predictor step (using Function objects)
-        u_pred.x.array[:] = u_prev.x.array[:] + dt * v_prev.x.array[:] + 0.5 * dt**2 * (1 - 2 * beta) * a_prev.x.array[:]
-        v_pred.x.array[:] = v_prev.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
-
-        # Solve for acceleration (using u_pred as initial guess)
-        u_k.x.array[:] = u_pred.x.array[:]  # Set initial guess for the solver
-        problem = LinearProblem(a, L, bcs=current_bcs, u=u_k)
-        u_k = problem.solve()
-
-        # Corrector step
-        a_k.x.array[:] = (1 / (beta * dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev.x.array[:]
-        v_k.x.array[:] = v_pred.x.array[:] + dt * gamma * a_k.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
-
-        u_interface[step, :] = u_k.x.array[interface_dofs] - u_prev.x.array[interface_dofs]
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
