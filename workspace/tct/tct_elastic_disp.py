@@ -9,7 +9,7 @@ from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot
 from misc.progress_bar import progressbar  # Assuming this is available
 
 
-def tct_elastic_generate(frequency: int = 1000):
+def tct_elastic_generate_u_interface(frequency: int = 1000):
     # 1. Domain and Mesh (same as before)
     width = 100.0
     height = 50.0
@@ -167,7 +167,7 @@ def tct_elastic_generate(frequency: int = 1000):
     return u_interface, f_interface
 
 
-def tct_elastic_apply(predictor, frequency: int = 1000):
+def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
     # 1. Domain and Mesh (same as before)
     width = 100.0
     height = 25.0
@@ -210,19 +210,6 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
     for i, node in enumerate(top_boundary_nodes):
         top_boundary_dofs[2 * i:2 * i + 2] = [node * 2, node * 2 + 1]
 
-    facet_indices, facet_markers = [], []
-    fdim = mesh.topology.dim - 1
-    marker = 88
-    facets = locate_entities(mesh, fdim, top_boundary)
-    facet_indices.append(facets)
-    facet_markers.append(np.full_like(facets, marker))
-    facet_indices = np.hstack(facet_indices).astype(np.int32)
-    facet_markers = np.hstack(facet_markers).astype(np.int32)
-    sorted_facets = np.argsort(facet_indices)
-    facet_tag = meshtags(mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
-
-    ds = Measure("ds", domain=mesh, subdomain_data=facet_tag)
-
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
     omega = 2 * np.pi * frequency
@@ -243,7 +230,7 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
     v = TestFunction(V)
     f = Constant(mesh, np.array([0.0, 0.0]))  # Force term
     a = inner(sigma(u), epsilon(v)) * dx
-    L_body = inner(f, v) * dx
+    L = inner(f, v) * dx
 
     # 6. Time Stepping (Newmark-beta)
     # time_total = 3e-3
@@ -259,7 +246,7 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
     a_k = Function(V, name="Acceleration")
     a_prev = Function(V)
 
-    neumann_forces = Function(V)
+    u_top = Function(V, name="InterfaceBC")
 
     # Initialize displacement and acceleration to zero
     u_k.x.array[:] = 0.0
@@ -274,6 +261,7 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
 
     u_full = []
     v_full = []
+    f_prev = np.zeros(len(top_boundary_dofs))
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -297,15 +285,17 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
             # Compute the force components (accounting for element size)
             interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
             interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
-        
-        neumann_forces.x.array[top_boundary_dofs] = interface_node_forces + predictor.predict([u_k.x.array - u_prev.x.array])[0]
 
-        L = L_body + dot(neumann_forces, v) * ds(marker)
+        delta_f = interface_node_forces - f_prev
+        f_prev = interface_node_forces
+
+        u_top.x.array[top_boundary_dofs] = u_prev.x.array[top_boundary_dofs] + predictor.predict([delta_f])[0]
+        bc_top = dirichletbc(u_top, top_boundary_nodes)
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
 
         # Update current boundary conditions
-        current_bcs = [bc_bottom]
+        current_bcs = [bc_bottom, bc_top]
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -390,19 +380,6 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     for i, node in enumerate(top_boundary_nodes_pred):
         top_boundary_dofs_pred[2 * i:2 * i + 2] = [node * 2, node * 2 + 1]
 
-    facet_indices_pred, facet_markers_pred = [], []
-    fdim_pred = mesh_pred.topology.dim - 1
-    marker_pred = 88
-    facets_pred = locate_entities(mesh_pred, fdim_pred, top_boundary_pred)
-    facet_indices_pred.append(facets_pred)
-    facet_markers_pred.append(np.full_like(facets_pred, marker_pred))
-    facet_indices_pred = np.hstack(facet_indices_pred).astype(np.int32)
-    facet_markers_pred = np.hstack(facet_markers_pred).astype(np.int32)
-    sorted_facets_pred = np.argsort(facet_indices_pred)
-    facet_tag_pred = meshtags(mesh_pred, fdim_pred, facet_indices_pred[sorted_facets_pred], facet_markers_pred[sorted_facets_pred])
-
-    ds_pred = Measure("ds", domain=mesh_pred, subdomain_data=facet_tag_pred)
-
     def interface_boundary(x):
         return np.isclose(x[1], 25.0)
 
@@ -442,7 +419,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     v_pred = TestFunction(V_pred)
     f_pred = Constant(mesh_pred, np.array([0.0, 0.0]))  # Force term
     a_pred = inner(sigma(u_pred), epsilon(v_pred)) * dx
-    L_body_pred = inner(f_pred, v_pred) * dx
+    L_pred = inner(f_pred, v_pred) * dx
 
     u_real = TrialFunction(V_real)
     v_real = TestFunction(V_real)
@@ -464,7 +441,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     a_k_pred = Function(V_pred, name="Acceleration")
     a_prev_pred = Function(V_pred)
 
-    neumann_forces_pred = Function(V_pred)
+    u_top_pred = Function(V_pred, name="InterfaceBC")
 
     # Initialize displacement and acceleration to zero
     u_k_pred.x.array[:] = 0.0
@@ -496,13 +473,11 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     u_full_real = []
     v_full_real = []
     prediction_error = []
+    f_prev_pred = np.zeros(len(top_boundary_nodes_pred) * 3)
     for step in progressbar(range(num_steps)):
         time += dt
 
         bc_bottom_pred = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes_pred, V_pred)
-
-        # Update current boundary conditions
-        current_bcs_pred = [bc_bottom_pred]
 
         # Project the stress to the function space W
         sigma_expr_pred = sigma(u_k_pred)
@@ -525,9 +500,14 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
             interface_node_forces_pred[2 * i] = sigma_xy #* element_size_y  # Fx
             interface_node_forces_pred[2 * i + 1] = sigma_yy #* element_size_y  # Fy
 
-        neumann_forces_pred.x.array[top_boundary_dofs_pred] = interface_node_forces_pred + predictor.predict([u_k_pred.x.array - u_prev_pred.x.array])[0]
+        delta_f_pred = interface_node_forces_pred - f_prev_pred
+        f_prev_pred = interface_node_forces_pred
 
-        L_pred = L_body_pred + dot(neumann_forces_pred, v_pred) * ds_pred(marker_pred)
+        u_top_pred.x.array[top_boundary_dofs_pred] = u_k_pred.x.array[top_boundary_dofs_pred] + predictor.predict([delta_f_pred])[0]
+        bc_top_pred = dirichletbc(u_top_pred, top_boundary_nodes_pred)
+
+        # Update current boundary conditions
+        current_bcs_pred = [bc_bottom_pred, bc_top_pred]
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -586,5 +566,5 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
 
 
 if __name__ == "__main__":
-    vtk_mesh_obj, u_full_data, v_full_data, interface_nodes = tct_elastic_generate()
+    vtk_mesh_obj, u_full_data, v_full_data, interface_nodes = tct_elastic_generate_u_interface()
     # Now you can use vtk_mesh_obj, u_full_data, v_full_data, interface_nodes for post-processing

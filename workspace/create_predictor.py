@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 
-from tct.tct_elastic import tct_elastic_generate_u_interface, tct_elastic_apply_u_interface
+from tct.tct_elastic_force import tct_elastic_generate_u_interface, tct_elastic_apply_u_interface
 from misc.plotting import format_vectors_from_flat, create_mesh_animation
 
 
@@ -91,7 +91,7 @@ def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> Non
 
 
 if __name__ == "__main__":
-    version = 5
+    version = 6
     frequency = 1000
     simulate_only = False
 
