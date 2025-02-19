@@ -142,14 +142,16 @@ def tct_elastic_generate_f_interface(frequency: int = 1000):
 
         interface_node_forces = np.zeros(len(interface_dofs))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(interface_nodes):
             sigma_xx = sigma_projected.x.array[4 * node]
             sigma_xy = sigma_projected.x.array[4 * node + 1]
             sigma_yy = sigma_projected.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
 
         # traction = np.zeros(len(interface_dofs))
@@ -207,9 +209,6 @@ def tct_elastic_apply_f_interface(forces_interface, frequency: int = 1000):
 
     mesh = create_rectangle(MPI.COMM_WORLD, cell_type=CellType.quadrilateral,
                             points=((0.0, 0.0), (width, height)), n=(nx, ny))
-
-    mesh.topology.create_connectivity(mesh.topology.dim - 1, mesh.topology.dim)
-    mesh_connectivity = mesh.topology.connectivity(mesh.topology.dim - 1, mesh.topology.dim)
 
     # 2. Function Space (same as before)
     V = functionspace(mesh, ("CG", 1, (2,)))
@@ -306,41 +305,6 @@ def tct_elastic_apply_f_interface(forces_interface, frequency: int = 1000):
     u_full = []
     for step in progressbar(range(num_steps)):
         time += dt
-
-        # Project the stress to the function space W
-        sigma_expr = sigma(u_k)
-
-        # Define the *bilinear* and *linear* forms for the projection
-        a_proj = inner(tau, w) * dx  # Bilinear form
-        L_proj = inner(sigma_expr, w) * dx  # Linear form (same as bilinear in this L2 projection case)
-
-        problem_stress = LinearProblem(a_proj, L_proj, u=sigma_projected)  # u=sigma_projected sets sigma_projected as the solution
-        problem_stress.solve()
-
-        # traction = np.zeros(len(top_boundary_dofs))
-
-        # # for node, coord in enumerate(mesh.geometry.x):
-        # for i, (coord, cells) in enumerate(zip(top_boundary_nodes_coords, top_boundary_nodes_cells)):
-        #     sigma_eval = 0
-
-        #     for cell in cells:
-        #         sigma_eval += sigma_projected.eval(coord, cell)  # Evaluate at each coordinate in its cell
-
-        #     sigma_eval /= len(cells)
-
-        #     traction[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
-        #     traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
-
-        # interface_node_forces = np.zeros(len(top_boundary_dofs))
-
-        # for i, node in enumerate(top_boundary_nodes):
-        #     sigma_xx = sigma_projected.x.array[4 * node]
-        #     sigma_xy = sigma_projected.x.array[4 * node + 1]
-        #     sigma_yy = sigma_projected.x.array[4 * node + 3]
-
-        #     # Compute the force components (accounting for element size)
-        #     interface_node_forces[2 * i] = -sigma_xy * element_size_y  # Fx
-        #     interface_node_forces[2 * i + 1] = -sigma_yy * element_size_y  # Fy
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
 

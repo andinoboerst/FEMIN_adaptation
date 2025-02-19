@@ -144,14 +144,16 @@ def tct_elastic_generate(frequency: int = 1000):
 
         interface_node_forces = np.zeros(len(interface_dofs))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(interface_nodes):
             sigma_xx = sigma_projected.x.array[4 * node]
             sigma_xy = sigma_projected.x.array[4 * node + 1]
             sigma_yy = sigma_projected.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
 
         f_interface[step, :] = interface_node_forces

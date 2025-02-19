@@ -145,14 +145,16 @@ def tct_elastic_generate(frequency: int = 1000):
 
         interface_node_forces = np.zeros(len(interface_dofs))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(interface_nodes):
             sigma_xx = sigma_projected.x.array[4 * node]
             sigma_xy = sigma_projected.x.array[4 * node + 1]
             sigma_yy = sigma_projected.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
 
         f_interface[step, :] = interface_node_forces - f_interface_prev
@@ -289,14 +291,16 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
 
         interface_node_forces = np.zeros(len(top_boundary_dofs))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(top_boundary_nodes):
             sigma_xx = sigma_projected.x.array[4 * node]
             sigma_xy = sigma_projected.x.array[4 * node + 1]
             sigma_yy = sigma_projected.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
         
         neumann_forces.x.array[top_boundary_dofs] = interface_node_forces + predictor.predict([u_k.x.array - u_prev.x.array])[0]
 
@@ -516,14 +520,16 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
 
         interface_node_forces_pred = np.zeros(len(top_boundary_dofs_pred))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(top_boundary_nodes_pred):
             sigma_xx = sigma_projected_pred.x.array[4 * node]
             sigma_xy = sigma_projected_pred.x.array[4 * node + 1]
             sigma_yy = sigma_projected_pred.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces_pred[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces_pred[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces_pred[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces_pred[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
         neumann_forces_pred.x.array[top_boundary_dofs_pred] = interface_node_forces_pred + predictor.predict([u_k_pred.x.array - u_prev_pred.x.array])[0]
 

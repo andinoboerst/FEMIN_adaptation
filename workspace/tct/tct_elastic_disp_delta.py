@@ -129,14 +129,16 @@ def tct_elastic_generate(frequency: int = 1000):
 
         interface_node_forces = np.zeros(len(interface_dofs))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(interface_nodes):
             sigma_xx = sigma_projected.x.array[4 * node]
             sigma_xy = sigma_projected.x.array[4 * node + 1]
             sigma_yy = sigma_projected.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
 
         f_interface[step, :] = interface_node_forces - f_interface_prev
@@ -277,14 +279,16 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
 
         interface_node_forces = np.zeros(len(top_boundary_dofs))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(top_boundary_nodes):
             sigma_xx = sigma_projected.x.array[4 * node]
             sigma_xy = sigma_projected.x.array[4 * node + 1]
             sigma_yy = sigma_projected.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
         delta_f = interface_node_forces - f_prev
         f_prev = interface_node_forces
@@ -491,14 +495,16 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
 
         interface_node_forces_pred = np.zeros(len(top_boundary_dofs_pred))
 
+        normal_vector = [0, 1]
+
         for i, node in enumerate(top_boundary_nodes_pred):
             sigma_xx = sigma_projected_pred.x.array[4 * node]
             sigma_xy = sigma_projected_pred.x.array[4 * node + 1]
             sigma_yy = sigma_projected_pred.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            interface_node_forces_pred[2 * i] = sigma_xy #* element_size_y  # Fx
-            interface_node_forces_pred[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+            interface_node_forces_pred[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
+            interface_node_forces_pred[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
         delta_f_pred = interface_node_forces_pred - f_prev_pred
         f_prev_pred = interface_node_forces_pred
