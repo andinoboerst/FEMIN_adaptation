@@ -114,6 +114,7 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
 
     u_interface = np.zeros((num_steps, len(interface_dofs)))
     tr_interface = np.zeros((num_steps, len(interface_nodes) * 3))
+    tr_interface_prev = np.zeros(len(interface_nodes) * 3)
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -154,7 +155,8 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
             # traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
 
-        tr_interface[step, :] = interface_node_stress
+        tr_interface[step, :] = interface_node_stress - tr_interface_prev
+        tr_interface_prev = interface_node_stress
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -281,6 +283,7 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
 
     u_full = []
     v_full = []
+    tr_prev = np.zeros(len(top_boundary_nodes) * 3)
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -308,14 +311,17 @@ def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
         #     traction[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
         #     traction[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
-        interface_node_stress = np.zeros(len(interface_nodes) * 3)
+        interface_node_stress = np.zeros(len(top_boundary_nodes) * 3)
 
-        for i, node in enumerate(interface_nodes):
+        for i, node in enumerate(top_boundary_nodes):
             interface_node_stress[3 * i] = sigma_projected.x.array[4 * node]
             interface_node_stress[3 * i + 1] = sigma_projected.x.array[4 * node + 1]
             interface_node_stress[3 * i + 2] = sigma_projected.x.array[4 * node + 3]
 
-        u_top.x.array[top_boundary_dofs] = u_prev.x.array[top_boundary_dofs] + predictor.predict([interface_node_stress])[0]
+        delta_tr = interface_node_stress - tr_prev
+        tr_prev = interface_node_stress
+
+        u_top.x.array[top_boundary_dofs] = u_prev.x.array[top_boundary_dofs] + predictor.predict([delta_tr])[0]
         bc_top = dirichletbc(u_top, top_boundary_nodes)
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
@@ -515,6 +521,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     u_full_real = []
     v_full_real = []
     prediction_error = []
+    tr_prev_pred = np.zeros(len(top_boundary_nodes_pred) * 3)
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -551,7 +558,10 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
             interface_node_stress_pred[3 * i + 1] = sigma_projected_pred.x.array[4 * node + 1]
             interface_node_stress_pred[3 * i + 2] = sigma_projected_pred.x.array[4 * node + 3]
 
-        u_top_pred.x.array[top_boundary_dofs_pred] = u_k_pred.x.array[top_boundary_dofs_pred] + predictor.predict([interface_node_stress_pred])[0]
+        delta_tr_pred = interface_node_stress_pred - tr_prev_pred
+        tr_prev_pred = interface_node_stress_pred
+
+        u_top_pred.x.array[top_boundary_dofs_pred] = u_k_pred.x.array[top_boundary_dofs_pred] + predictor.predict([delta_tr_pred])[0]
         bc_top_pred = dirichletbc(u_top_pred, top_boundary_nodes_pred)
 
         # Update current boundary conditions
@@ -604,12 +614,12 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
         #     traction_real[2 * i] = sigma_eval[0] * 0 - sigma_eval[1] * 5
         #     traction_real[2 * i + 1] = sigma_eval[2] * 0 - sigma_eval[3] * 5
 
-        interface_node_stress_real = np.zeros(len(interface_nodes_real) * 3)
+        # interface_node_stress_real = np.zeros(len(interface_nodes_real) * 3)
 
-        for i, node in enumerate(interface_nodes_real):
-            interface_node_stress_real[3 * i] = sigma_projected_real.x.array[4 * node]
-            interface_node_stress_real[3 * i + 1] = sigma_projected_real.x.array[4 * node + 1]
-            interface_node_stress_real[3 * i + 2] = sigma_projected_real.x.array[4 * node + 3]
+        # for i, node in enumerate(interface_nodes_real):
+        #     interface_node_stress_real[3 * i] = sigma_projected_real.x.array[4 * node]
+        #     interface_node_stress_real[3 * i + 1] = sigma_projected_real.x.array[4 * node + 1]
+        #     interface_node_stress_real[3 * i + 2] = sigma_projected_real.x.array[4 * node + 3]
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)

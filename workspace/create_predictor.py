@@ -91,7 +91,7 @@ def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> Non
 
 
 if __name__ == "__main__":
-    version = 4
+    version = 5
     frequency = 1000
     simulate_only = False
 
