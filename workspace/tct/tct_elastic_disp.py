@@ -108,7 +108,6 @@ def tct_elastic_generate(frequency: int = 1000):
 
     u_interface = np.zeros((num_steps, len(interface_dofs)))
     f_interface = np.zeros((num_steps, len(interface_dofs)))
-    f_interface_prev = np.zeros(len(interface_dofs))
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -139,8 +138,7 @@ def tct_elastic_generate(frequency: int = 1000):
             interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
 
 
-        f_interface[step, :] = interface_node_forces - f_interface_prev
-        f_interface_prev = interface_node_forces
+        f_interface[step, :] = interface_node_forces
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -156,7 +154,7 @@ def tct_elastic_generate(frequency: int = 1000):
         a_k.x.array[:] = (1 / (beta * dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev.x.array[:]
         v_k.x.array[:] = v_pred.x.array[:] + dt * gamma * a_k.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
 
-        u_interface[step, :] = u_k.x.array[interface_dofs] - u_prev.x.array[interface_dofs]
+        u_interface[step, :] = u_k.x.array[interface_dofs]
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
@@ -164,7 +162,7 @@ def tct_elastic_generate(frequency: int = 1000):
         a_prev.x.array[:] = a_k.x.array[:]
 
     print("Simulation complete")
-    return u_interface, f_interface
+    return f_interface, u_interface
 
 
 def tct_elastic_apply(predictor, frequency: int = 1000):
@@ -261,7 +259,6 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
 
     u_full = []
     v_full = []
-    f_prev = np.zeros(len(top_boundary_dofs))
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -286,10 +283,7 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
             interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
             interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
 
-        delta_f = interface_node_forces - f_prev
-        f_prev = interface_node_forces
-
-        u_top.x.array[top_boundary_dofs] = u_prev.x.array[top_boundary_dofs] + predictor.predict([delta_f])[0]
+        u_top.x.array[top_boundary_dofs] = predictor.predict([interface_node_forces])[0]
         bc_top = dirichletbc(u_top, top_boundary_nodes)
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
@@ -473,7 +467,6 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     u_full_real = []
     v_full_real = []
     prediction_error = []
-    f_prev_pred = np.zeros(len(top_boundary_nodes_pred) * 3)
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -500,10 +493,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
             interface_node_forces_pred[2 * i] = sigma_xy #* element_size_y  # Fx
             interface_node_forces_pred[2 * i + 1] = sigma_yy #* element_size_y  # Fy
 
-        delta_f_pred = interface_node_forces_pred - f_prev_pred
-        f_prev_pred = interface_node_forces_pred
-
-        u_top_pred.x.array[top_boundary_dofs_pred] = u_k_pred.x.array[top_boundary_dofs_pred] + predictor.predict([delta_f_pred])[0]
+        u_top_pred.x.array[top_boundary_dofs_pred] = predictor.predict([interface_node_forces_pred])[0]
         bc_top_pred = dirichletbc(u_top_pred, top_boundary_nodes_pred)
 
         # Update current boundary conditions

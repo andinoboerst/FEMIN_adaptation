@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 
-from tct.tct_elastic_disp import tct_elastic_generate, tct_elastic_apply
+from tct.tct_elastic_force import tct_elastic_generate, tct_elastic_apply
 from misc.plotting import format_vectors_from_flat, create_mesh_animation
 
 
@@ -21,10 +21,10 @@ def generate_training_set(version: int = 1):
     training_out = []
     for frequency in frequency_range:
         print("Running Simulation for frequency: ", frequency)
-        u, t = tct_elastic_generate(frequency)
+        data_in, data_out = tct_elastic_generate(frequency)
     
-        training_in.append(t)
-        training_out.append(u)
+        training_in.append(data_in)
+        training_out.append(data_out)
 
     with open(f"{DATA_FOLDER}/training_in_v{version:02}.npy", "wb") as f:
         np.save(f, np.array(training_in))

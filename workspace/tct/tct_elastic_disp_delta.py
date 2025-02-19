@@ -108,6 +108,7 @@ def tct_elastic_generate(frequency: int = 1000):
 
     u_interface = np.zeros((num_steps, len(interface_dofs)))
     f_interface = np.zeros((num_steps, len(interface_dofs)))
+    f_interface_prev = np.zeros(len(interface_dofs))
     for step in progressbar(range(num_steps)):
         time += dt
 
@@ -115,22 +116,6 @@ def tct_elastic_generate(frequency: int = 1000):
 
         # Update current boundary conditions
         current_bcs = [bc_top, bc_bottom]
-
-        u_interface[step, :] = u_k.x.array[interface_dofs]
-
-        # Solve using Newmark-beta
-        # Predictor step (using Function objects)
-        u_pred.x.array[:] = u_prev.x.array[:] + dt * v_prev.x.array[:] + 0.5 * dt**2 * (1 - 2 * beta) * a_prev.x.array[:]
-        v_pred.x.array[:] = v_prev.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
-
-        # Solve for acceleration (using u_pred as initial guess)
-        u_k.x.array[:] = u_pred.x.array[:]  # Set initial guess for the solver
-        problem = LinearProblem(a, L, bcs=current_bcs, u=u_k)
-        u_k = problem.solve()
-
-        # Corrector step
-        a_k.x.array[:] = (1 / (beta * dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev.x.array[:]
-        v_k.x.array[:] = v_pred.x.array[:] + dt * gamma * a_k.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
 
         # Project the stress to the function space W
         sigma_expr = sigma(u_k)
@@ -154,7 +139,24 @@ def tct_elastic_generate(frequency: int = 1000):
             interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
 
 
-        f_interface[step, :] = interface_node_forces
+        f_interface[step, :] = interface_node_forces - f_interface_prev
+        f_interface_prev = interface_node_forces
+
+        # Solve using Newmark-beta
+        # Predictor step (using Function objects)
+        u_pred.x.array[:] = u_prev.x.array[:] + dt * v_prev.x.array[:] + 0.5 * dt**2 * (1 - 2 * beta) * a_prev.x.array[:]
+        v_pred.x.array[:] = v_prev.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
+
+        # Solve for acceleration (using u_pred as initial guess)
+        u_k.x.array[:] = u_pred.x.array[:]  # Set initial guess for the solver
+        problem = LinearProblem(a, L, bcs=current_bcs, u=u_k)
+        u_k = problem.solve()
+
+        # Corrector step
+        a_k.x.array[:] = (1 / (beta * dt**2)) * (u_k.x.array[:] - u_pred.x.array[:]) - ((1 - 2 * beta) / (2 * beta)) * a_prev.x.array[:]
+        v_k.x.array[:] = v_pred.x.array[:] + dt * gamma * a_k.x.array[:] + dt * (1 - gamma) * a_prev.x.array[:]
+
+        u_interface[step, :] = u_k.x.array[interface_dofs] - u_prev.x.array[interface_dofs]
 
         # Update previous values
         u_prev.x.array[:] = u_k.x.array[:]
@@ -162,7 +164,7 @@ def tct_elastic_generate(frequency: int = 1000):
         a_prev.x.array[:] = a_k.x.array[:]
 
     print("Simulation complete")
-    return u_interface, f_interface
+    return f_interface, u_interface
 
 
 def tct_elastic_apply(predictor, frequency: int = 1000):
@@ -179,6 +181,10 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
 
     # 2. Function Space (same as before)
     V = functionspace(mesh, ("CG", 1, (2,)))
+    W = functionspace(mesh, ("CG", 1, (2, 2)))  # Or ("CG", 1) if you want continuous stress
+    sigma_projected = Function(W)
+    w = TestFunction(W)
+    tau = TrialFunction(W)
 
     # 3. Material Properties (same as before)
     E = 200.0e3
@@ -204,19 +210,6 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
     for i, node in enumerate(top_boundary_nodes):
         top_boundary_dofs[2 * i:2 * i + 2] = [node * 2, node * 2 + 1]
 
-    facet_indices, facet_markers = [], []
-    fdim = mesh.topology.dim - 1
-    marker = 88
-    facets = locate_entities(mesh, fdim, top_boundary)
-    facet_indices.append(facets)
-    facet_markers.append(np.full_like(facets, marker))
-    facet_indices = np.hstack(facet_indices).astype(np.int32)
-    facet_markers = np.hstack(facet_markers).astype(np.int32)
-    sorted_facets = np.argsort(facet_indices)
-    facet_tag = meshtags(mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
-
-    ds = Measure("ds", domain=mesh, subdomain_data=facet_tag)
-
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
     omega = 2 * np.pi * frequency
@@ -237,7 +230,7 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
     v = TestFunction(V)
     f = Constant(mesh, np.array([0.0, 0.0]))  # Force term
     a = inner(sigma(u), epsilon(v)) * dx
-    L_body = inner(f, v) * dx
+    L = inner(f, v) * dx
 
     # 6. Time Stepping (Newmark-beta)
     # time_total = 3e-3
@@ -253,7 +246,7 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
     a_k = Function(V, name="Acceleration")
     a_prev = Function(V)
 
-    neumann_forces = Function(V)
+    u_top = Function(V, name="InterfaceBC")
 
     # Initialize displacement and acceleration to zero
     u_k.x.array[:] = 0.0
@@ -268,17 +261,41 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
 
     u_full = []
     v_full = []
+    f_prev = np.zeros(len(top_boundary_dofs))
     for step in progressbar(range(num_steps)):
         time += dt
-        
-        neumann_forces.x.array[top_boundary_dofs] = predictor.predict([u_k.x.array])[0]
 
-        L = L_body + dot(neumann_forces, v) * ds(marker)
+        # Project the stress to the function space W
+        sigma_expr = sigma(u_k)
+
+        # Define the *bilinear* and *linear* forms for the projection
+        a_proj = inner(tau, w) * dx  # Bilinear form
+        L_proj = inner(sigma_expr, w) * dx  # Linear form (same as bilinear in this L2 projection case)
+
+        problem_stress = LinearProblem(a_proj, L_proj, u=sigma_projected)  # u=sigma_projected sets sigma_projected as the solution
+        problem_stress.solve()
+
+        interface_node_forces = np.zeros(len(top_boundary_dofs))
+
+        for i, node in enumerate(top_boundary_nodes):
+            sigma_xx = sigma_projected.x.array[4 * node]
+            sigma_xy = sigma_projected.x.array[4 * node + 1]
+            sigma_yy = sigma_projected.x.array[4 * node + 3]
+
+            # Compute the force components (accounting for element size)
+            interface_node_forces[2 * i] = sigma_xy #* element_size_y  # Fx
+            interface_node_forces[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+
+        delta_f = interface_node_forces - f_prev
+        f_prev = interface_node_forces
+
+        u_top.x.array[top_boundary_dofs] = u_prev.x.array[top_boundary_dofs] + predictor.predict([delta_f])[0]
+        bc_top = dirichletbc(u_top, top_boundary_nodes)
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
 
         # Update current boundary conditions
-        current_bcs = [bc_bottom]
+        current_bcs = [bc_bottom, bc_top]
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
@@ -326,6 +343,10 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
 
     # 2. Function Space (same as before)
     V_pred = functionspace(mesh_pred, ("CG", 1, (2,)))
+    W_pred = functionspace(mesh_pred, ("DG", 0, (2, 2)))  # Or ("CG", 1) if you want continuous stress
+    sigma_projected_pred = Function(W_pred)
+    w_pred = TestFunction(W_pred)
+    tau_pred = TrialFunction(W_pred)
 
     V_real = functionspace(mesh_real, ("CG", 1, (2,)))
 
@@ -358,19 +379,6 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     top_boundary_dofs_pred = np.zeros(len(top_boundary_nodes_pred) * 2, dtype=int)
     for i, node in enumerate(top_boundary_nodes_pred):
         top_boundary_dofs_pred[2 * i:2 * i + 2] = [node * 2, node * 2 + 1]
-
-    facet_indices_pred, facet_markers_pred = [], []
-    fdim_pred = mesh_pred.topology.dim - 1
-    marker_pred = 88
-    facets_pred = locate_entities(mesh_pred, fdim_pred, top_boundary_pred)
-    facet_indices_pred.append(facets_pred)
-    facet_markers_pred.append(np.full_like(facets_pred, marker_pred))
-    facet_indices_pred = np.hstack(facet_indices_pred).astype(np.int32)
-    facet_markers_pred = np.hstack(facet_markers_pred).astype(np.int32)
-    sorted_facets_pred = np.argsort(facet_indices_pred)
-    facet_tag_pred = meshtags(mesh_pred, fdim_pred, facet_indices_pred[sorted_facets_pred], facet_markers_pred[sorted_facets_pred])
-
-    ds_pred = Measure("ds", domain=mesh_pred, subdomain_data=facet_tag_pred)
 
     def interface_boundary(x):
         return np.isclose(x[1], 25.0)
@@ -411,7 +419,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     v_pred = TestFunction(V_pred)
     f_pred = Constant(mesh_pred, np.array([0.0, 0.0]))  # Force term
     a_pred = inner(sigma(u_pred), epsilon(v_pred)) * dx
-    L_body_pred = inner(f_pred, v_pred) * dx
+    L_pred = inner(f_pred, v_pred) * dx
 
     u_real = TrialFunction(V_real)
     v_real = TestFunction(V_real)
@@ -433,7 +441,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     a_k_pred = Function(V_pred, name="Acceleration")
     a_prev_pred = Function(V_pred)
 
-    neumann_forces_pred = Function(V_pred)
+    u_top_pred = Function(V_pred, name="InterfaceBC")
 
     # Initialize displacement and acceleration to zero
     u_k_pred.x.array[:] = 0.0
@@ -465,17 +473,41 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
     u_full_real = []
     v_full_real = []
     prediction_error = []
+    f_prev_pred = np.zeros(len(top_boundary_dofs_pred))
     for step in progressbar(range(num_steps)):
         time += dt
 
         bc_bottom_pred = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes_pred, V_pred)
 
+        # Project the stress to the function space W
+        sigma_expr_pred = sigma(u_k_pred)
+
+        # Define the *bilinear* and *linear* forms for the projection
+        a_proj_pred = inner(tau_pred, w_pred) * dx  # Bilinear form
+        L_proj_pred = inner(sigma_expr_pred, w_pred) * dx  # Linear form (same as bilinear in this L2 projection case)
+
+        problem_stress_pred = LinearProblem(a_proj_pred, L_proj_pred, u=sigma_projected_pred)  # u=sigma_projected sets sigma_projected as the solution
+        problem_stress_pred.solve()
+
+        interface_node_forces_pred = np.zeros(len(top_boundary_dofs_pred))
+
+        for i, node in enumerate(top_boundary_nodes_pred):
+            sigma_xx = sigma_projected_pred.x.array[4 * node]
+            sigma_xy = sigma_projected_pred.x.array[4 * node + 1]
+            sigma_yy = sigma_projected_pred.x.array[4 * node + 3]
+
+            # Compute the force components (accounting for element size)
+            interface_node_forces_pred[2 * i] = sigma_xy #* element_size_y  # Fx
+            interface_node_forces_pred[2 * i + 1] = sigma_yy #* element_size_y  # Fy
+
+        delta_f_pred = interface_node_forces_pred - f_prev_pred
+        f_prev_pred = interface_node_forces_pred
+
+        u_top_pred.x.array[top_boundary_dofs_pred] = u_k_pred.x.array[top_boundary_dofs_pred] + predictor.predict([delta_f_pred])[0]
+        bc_top_pred = dirichletbc(u_top_pred, top_boundary_nodes_pred)
+
         # Update current boundary conditions
-        current_bcs_pred = [bc_bottom_pred]
-
-        neumann_forces_pred.x.array[top_boundary_dofs_pred] = predictor.predict([u_k_pred.x.array])[0]
-
-        L_pred = L_body_pred + dot(neumann_forces_pred, v_pred) * ds_pred(marker_pred)
+        current_bcs_pred = [bc_bottom_pred, bc_top_pred]
 
         # Solve using Newmark-beta
         # Predictor step (using Function objects)
