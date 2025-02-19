@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 
-from tct.tct_elastic_force import tct_elastic_generate_u_interface, tct_elastic_apply_u_interface
+from tct.tct_elastic_disp import tct_elastic_generate, tct_elastic_apply
 from misc.plotting import format_vectors_from_flat, create_mesh_animation
 
 
@@ -21,7 +21,7 @@ def generate_training_set(version: int = 1):
     training_out = []
     for frequency in frequency_range:
         print("Running Simulation for frequency: ", frequency)
-        u, t = tct_elastic_generate_u_interface(frequency)
+        u, t = tct_elastic_generate(frequency)
     
         training_in.append(t)
         training_out.append(u)
@@ -71,7 +71,7 @@ def apply_predictor(version: int = 1, frequency: int = 1000) -> None:
     with open(f"{DATA_FOLDER}/model_v{version:02}.pkl", "rb") as f:
         predictor = pickle.load(f)
     
-    mesh, u, v = tct_elastic_apply_u_interface(predictor, frequency)
+    mesh, u, v = tct_elastic_apply(predictor, frequency)
 
     u_tensor = format_vectors_from_flat(u)
     v_tensor = format_vectors_from_flat(v)
@@ -93,7 +93,7 @@ def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> Non
 if __name__ == "__main__":
     version = 6
     frequency = 1000
-    simulate_only = False
+    simulate_only = True
 
     try:
         os.mkdir(DATA_FOLDER)

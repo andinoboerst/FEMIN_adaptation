@@ -26,7 +26,8 @@
             "ms-toolsai.jupyter",  // Jupyter extension
             "codeium.codeium",  // Codeium
             "ms-azuretools.vscode-docker",  // Docker extension
-            "ms-python.black-formatter"  // Black extension
+            "ms-python.black-formatter",  // Black extension
+            "bierner.gif-player"  // gif player
         ]
       }
     }

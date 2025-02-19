@@ -9,7 +9,7 @@ from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot
 from misc.progress_bar import progressbar  # Assuming this is available
 
 
-def tct_elastic_generate_u_interface(frequency: int = 1000):
+def tct_elastic_generate(frequency: int = 1000):
     # 1. Domain and Mesh (same as before)
     width = 100.0
     height = 50.0
@@ -167,7 +167,7 @@ def tct_elastic_generate_u_interface(frequency: int = 1000):
     return u_interface, f_interface
 
 
-def tct_elastic_apply_u_interface(predictor, frequency: int = 1000):
+def tct_elastic_apply(predictor, frequency: int = 1000):
     # 1. Domain and Mesh (same as before)
     width = 100.0
     height = 25.0
@@ -566,5 +566,5 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
 
 
 if __name__ == "__main__":
-    vtk_mesh_obj, u_full_data, v_full_data, interface_nodes = tct_elastic_generate_u_interface()
+    vtk_mesh_obj, u_full_data, v_full_data, interface_nodes = tct_elastic_generate()
     # Now you can use vtk_mesh_obj, u_full_data, v_full_data, interface_nodes for post-processing

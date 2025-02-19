@@ -72,10 +72,13 @@ def create_mesh_animation(mesh, scalars=None, vectors=None, name: str="result", 
         **grid_props,
     )
 
+    time_steps = len(scalars) * 100
+    text = plotter.add_text(text=f"0/{time_steps}", position="lower_left", font_size=8)
+
     plotter.view_xy()
     plotter.camera.zoom(1.3)
 
-    for scalar, vector in zip(scalars, vectors):
+    for i, (scalar, vector) in enumerate(zip(scalars, vectors)):
         grid_base['vectors'] = vector
         grid = grid_base.warp_by_vector()
         grid['scalars'] = scalar
@@ -83,6 +86,7 @@ def create_mesh_animation(mesh, scalars=None, vectors=None, name: str="result", 
             grid,
             **grid_props
         )
+        text.SetText(0, f"{i*100}/{time_steps}")
         plotter.write_frame()
 
     plotter.close()
