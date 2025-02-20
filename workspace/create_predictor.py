@@ -7,8 +7,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 
-from tct.tct_elastic_force import tct_elastic_generate, tct_elastic_apply
-from misc.plotting import format_vectors_from_flat, create_mesh_animation
+from tct.tct_elastic_force import TCTForceExtract, TCTForceApply
 
 
 DATA_FOLDER = "results"
@@ -21,10 +20,11 @@ def generate_training_set(version: int = 1):
     training_out = []
     for frequency in frequency_range:
         print("Running Simulation for frequency: ", frequency)
-        data_in, data_out = tct_elastic_generate(frequency)
+        tct = TCTForceExtract(frequency)
+        tct.run()
     
-        training_in.append(data_in)
-        training_out.append(data_out)
+        training_in.append(tct.data_in)
+        training_out.append(tct.data_out)
 
     with open(f"{DATA_FOLDER}/training_in_v{version:02}.npy", "wb") as f:
         np.save(f, np.array(training_in))
@@ -71,15 +71,13 @@ def apply_predictor(version: int = 1, frequency: int = 1000) -> None:
     with open(f"{DATA_FOLDER}/model_v{version:02}.pkl", "rb") as f:
         predictor = pickle.load(f)
     
-    mesh, u, v = tct_elastic_apply(predictor, frequency)
-
-    u_tensor = format_vectors_from_flat(u)
-    v_tensor = format_vectors_from_flat(v)
+    tct = TCTForceApply(predictor, frequency)
+    tct.run()
 
     with open(f"{DATA_FOLDER}/sim_results_v{version:02}.pkl", "wb") as f:
-        pickle.dump((mesh, u_tensor, v_tensor), f)
+        pickle.dump(tct, f)
 
-    create_mesh_animation(mesh, u_tensor[:, :, 1], u_tensor, name=f"{DATA_FOLDER}/prediction_v{version:02}")
+    tct.postprocess("u_y", "u", name=f"{DATA_FOLDER}/prediction_v{version:02}")
 
 
 def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> None:
