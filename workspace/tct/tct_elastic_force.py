@@ -522,7 +522,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
         v_prev_real.x.array[:] = v_k_real.x.array[:]
         a_prev_real.x.array[:] = a_k_real.x.array[:]
 
-        prediction_error.append(abs(u_k_real.x.array[interface_dofs_real] - u_k_pred.x.array[top_boundary_dofs_pred]).mean())
+        prediction_error.append(u_k_real.x.array[interface_dofs_real] - u_k_pred.x.array[top_boundary_dofs_pred])
 
 
         if step % 100 == 0:

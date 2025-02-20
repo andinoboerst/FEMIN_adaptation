@@ -15,8 +15,6 @@ class TCTSimulation(metaclass=abc.ABCMeta):
 
     E = 200.0e3
     nu = 0.3
-    mu = E / (2.0 * (1.0 + nu))
-    lmbda = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
 
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
@@ -24,8 +22,6 @@ class TCTSimulation(metaclass=abc.ABCMeta):
     # Time Stepping
     time_total = 3e-3
     dt = 5e-7
-    num_steps = int(time_total / dt)
-    start_time = 0.0
 
     # Newmark-beta parameters
     beta = 0.25
@@ -35,30 +31,35 @@ class TCTSimulation(metaclass=abc.ABCMeta):
     width = 100.0
     element_size_x = 5.0
     element_size_y = 5.0
-    nx = int(width / element_size_x)
 
-    def __init__(self, height: float = 50.0, frequency: int = 1000) -> None:
-        self.height = height
-        self.ny = int(self.height / self.element_size_y)
+    def __init__(self, frequency: int = 1000) -> None:
         self.omega = 2 * np.pi * frequency
-
-        self._define_mesh_functionspace()
-        self._init_variables()
-
-        self.setup()
     
     def plot_variables(self) -> tuple:
-        return (self.u_k, self.v_k, self.a_k)
+        return (self.u_k.x.array.copy(), self.v_k.x.array.copy(), self.a_k.x.array.copy())
 
     @abc.abstractmethod
-    def setup(self) -> None:
+    def _setup(self) -> None:
         raise NotImplementedError("Must implement setup()")
     
     @abc.abstractmethod
     def solve_time_step(self) -> None:
         raise NotImplementedError("Must implement solve_time_step()")
 
+    @property
+    def height(self) -> float:
+        return 50.0
+
+    def setup(self) -> None:
+        self._define_mesh_functionspace()
+        self._init_variables()
+
+        self._setup()
+
     def _define_mesh_functionspace(self) -> None:
+        self.nx = int(self.width / self.element_size_x)
+        self.ny = int(self.height / self.element_size_y)
+
         self.mesh = create_rectangle(MPI.COMM_WORLD, cell_type=CellType.quadrilateral,
                             points=((0.0, 0.0), (self.width, self.height)), n=(self.nx, self.ny))
 
@@ -69,6 +70,12 @@ class TCTSimulation(metaclass=abc.ABCMeta):
         self.tau = TrialFunction(self.W)
 
     def _init_variables(self) -> None:
+        self.mu = self.E / (2.0 * (1.0 + self.nu))
+        self.lmbda = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
+
+        self.num_steps = int(self.time_total / self.dt)
+        self.time = 0.0
+
         self.u = TrialFunction(self.V)
         self.v = TestFunction(self.V)
         self.f = Constant(self.mesh, np.array([0.0, 0.0]))  # Force term
@@ -90,27 +97,18 @@ class TCTSimulation(metaclass=abc.ABCMeta):
         self.u_pred = Function(self.V)
         self.v_pred = Function(self.V)
 
-        self.dirichlet_bcs = []
+        self.bottom_boundary_nodes = self.get_boundary_nodes(self.bottom_boundary)
 
-    def setup_neumann_bcs(self, bcs: list[tuple]) -> None:
-        facet_indices, facet_markers = [], []
-        fdim = self.mesh.topology.dim - 1
-        for marker, boundary in bcs:
-            # marker = 88
-            facets = locate_entities(self.mesh, fdim, boundary)
-            facet_indices.append(facets)
-            facet_markers.append(np.full_like(facets, marker))
-
-        facet_indices = np.hstack(facet_indices).astype(np.int32)
-        facet_markers = np.hstack(facet_markers).astype(np.int32)
-        sorted_facets = np.argsort(facet_indices)
-        facet_tag = meshtags(self.mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
-
-        self.ds = Measure("ds", domain=self.mesh, subdomain_data=facet_tag)
-
+        self.current_dirichlet_bcs = []
+    
     def _bottom_displacement_function(self, t):
         value = self.amplitude * np.sin(self.omega * t)
         return Constant(self.mesh, np.array([0, value]))
+
+    def _update_prev_values(self) -> None:
+        self.u_prev.x.array[:] = self.u_k.x.array[:]
+        self.v_prev.x.array[:] = self.v_k.x.array[:]
+        self.a_prev.x.array[:] = self.a_k.x.array[:]
 
     @staticmethod
     def top_boundary(x):
@@ -131,21 +129,46 @@ class TCTSimulation(metaclass=abc.ABCMeta):
     def sigma(self, u):
         return self.lmbda * tr(self.epsilon(u)) * Identity(self.mesh.geometry.dim) + 2 * self.mu * self.epsilon(u)
 
-    def boundary_nodes_dofs(self, boundary, sort: bool = False) -> tuple[np.array]:
+    def get_boundary_nodes(self, boundary, sort: bool = False) -> np.array:
         boundary_nodes = locate_dofs_geometrical(self.V, boundary)
 
         if sort:
             boundary_node_x_coords = np.array([self.mesh.geometry.x[node, 0] for node in boundary_nodes])
             boundary_nodes_sorted_indices = np.argsort(boundary_node_x_coords)
             boundary_nodes = boundary_nodes[boundary_nodes_sorted_indices]
+        
+        return boundary_nodes
 
+    def get_boundary_dofs(self, boundary_nodes) -> np.array:
         boundary_dofs = np.zeros(len(boundary_nodes) * 2, dtype=int)
         for i, node in enumerate(boundary_nodes):
             boundary_dofs[2 * i:2 * i + 2] = [node * 2, node * 2 + 1]
 
-        boundary_nodes, boundary_dofs
+        return boundary_dofs
 
-    def solve_u_time_step(self) -> None:
+    def setup_neumann_bcs(self, bcs: list[tuple]) -> None:
+        facet_indices, facet_markers = [], []
+        fdim = self.mesh.topology.dim - 1
+        for marker, boundary in bcs:
+            # marker = 88
+            facets = locate_entities(self.mesh, fdim, boundary)
+            facet_indices.append(facets)
+            facet_markers.append(np.full_like(facets, marker))
+
+        facet_indices = np.hstack(facet_indices).astype(np.int32)
+        facet_markers = np.hstack(facet_markers).astype(np.int32)
+        sorted_facets = np.argsort(facet_indices)
+        facet_tag = meshtags(self.mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
+
+        self.ds = Measure("ds", domain=self.mesh, subdomain_data=facet_tag)
+    
+    def add_dirichlet_bc(self, values, nodes) -> None:
+        self.current_dirichlet_bcs.append(dirichletbc(values, nodes, self.V))
+
+    def add_neumann_bc(self, values, marker) -> None:
+        self.L += dot(values, self.v) * self.ds(marker)
+
+    def solve_u(self) -> None:
         # Solve using Newmark-beta
         # Predictor step
         self.u_pred.x.array[:] = self.u_prev.x.array[:] + self.dt * self.v_prev.x.array[:] + 0.5 * self.dt**2 * (1 - 2 * self.beta) * self.a_prev.x.array[:]
@@ -159,11 +182,6 @@ class TCTSimulation(metaclass=abc.ABCMeta):
         # Corrector step
         self.a_k.x.array[:] = (1 / (self.beta * self.dt**2)) * (self.u_k.x.array[:] - self.u_pred.x.array[:]) - ((1 - 2 * self.beta) / (2 * self.beta)) * self.a_prev.x.array[:]
         self.v_k.x.array[:] = self.v_pred.x.array[:] + self.dt * self.gamma * self.a_k.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
-    
-    def _update_prev_values(self) -> None:
-        self.u_prev.x.array[:] = self.u_k.x.array[:]
-        self.v_prev.x.array[:] = self.v_k.x.array[:]
-        self.a_prev.x.array[:] = self.a_k.x.array[:]
 
     def calculate_forces(self, nodes) -> np.array:
         # Project the stress to the function space W
@@ -190,21 +208,18 @@ class TCTSimulation(metaclass=abc.ABCMeta):
             node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
 
         return node_forces
-    
-    def add_dirichlet_bc(self, bc) -> None:
-        self.current_dirichlet_bcs.append(bc)
-
-    def add_neumann_bc(self, values, marker) -> None:
-        self.L += dot(values, self.v) * self.ds(marker)
 
     def run(self) -> None:
-        self.plot_results = {[] * len(self.plot_variables())}
+        self.setup()
+
+        self.dirichlet_bcs = self.current_dirichlet_bcs.copy()
+
+        self.plot_results = tuple([] for i in range(len(self.plot_variables())))
         for self.step in progressbar(range(self.num_steps)):
             self.time += self.dt
-            self.current_dirichlet_bcs = self.dirichlet_bcs
+            self.current_dirichlet_bcs = self.dirichlet_bcs.copy()
 
-            self.bc_bottom = dirichletbc(self._bottom_displacement_function(self.time), self.bottom_boundary_nodes, self.V)
-            self.add_dirichlet_bc(self.bc_bottom)
+            self.add_dirichlet_bc(self._bottom_displacement_function(self.time), self.bottom_boundary_nodes)
 
             self.L = self.L_body
 
@@ -245,5 +260,5 @@ class TCTSimulation(metaclass=abc.ABCMeta):
         elif scalar_coord == "z":
             scalar_num = 2
 
-        vtk_mesh = vtk_mesh(self.mesh)
-        create_mesh_animation(vtk_mesh, variables[scalar_variable][:, :, scalar_num], variables[vector_variable], name=name)
+        plot_mesh = vtk_mesh(self.mesh)
+        create_mesh_animation(plot_mesh, variables[scalar_variable][:, :, scalar_num], variables[vector_variable], name=name)

@@ -11,7 +11,7 @@ def format_vectors_from_flat(u: np.ndarray, n_dim: int = 2) -> np.ndarray:
     for u_i in u:
         u_x.append(u_i[::n_dim])
         u_y.append(u_i[1::n_dim])
-        u_z.append(u_i[1::n_dim])
+        u_z.append(u_i[2::n_dim])
 
     if n_dim == 2:
         u_z = [[0] * len(u_x[0])] * len(u_x)
