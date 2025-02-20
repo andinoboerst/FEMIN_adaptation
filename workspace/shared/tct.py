@@ -108,7 +108,7 @@ class TCTSimulation(metaclass=abc.ABCMeta):
 
         self.ds = Measure("ds", domain=self.mesh, subdomain_data=facet_tag)
 
-    def bottom_displacement_function(self, t):
+    def _bottom_displacement_function(self, t):
         value = self.amplitude * np.sin(self.omega * t)
         return Constant(self.mesh, np.array([0, value]))
 
@@ -203,7 +203,7 @@ class TCTSimulation(metaclass=abc.ABCMeta):
             self.time += self.dt
             self.current_dirichlet_bcs = self.dirichlet_bcs
 
-            self.bc_bottom = dirichletbc(self.bottom_displacement_function(self.time), self.bottom_boundary_nodes, self.V)
+            self.bc_bottom = dirichletbc(self._bottom_displacement_function(self.time), self.bottom_boundary_nodes, self.V)
             self.add_dirichlet_bc(self.bc_bottom)
 
             self.L = self.L_body
