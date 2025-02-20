@@ -273,7 +273,7 @@ def tct_elastic_apply(predictor, frequency: int = 1000):
     for step in progressbar(range(num_steps)):
         time += dt
         
-        neumann_forces.x.array[top_boundary_dofs] = predictor.predict([u_k.x.array])[0]
+        neumann_forces.x.array[top_boundary_dofs] = predictor.predict([u_k.x.array[top_boundary_dofs]])[0]
 
         L = L_body + dot(neumann_forces, v) * ds(marker)
 
@@ -475,7 +475,7 @@ def tct_elastic_predictor_error_comparison(predictor, frequency: int = 1000):
         # Update current boundary conditions
         current_bcs_pred = [bc_bottom_pred]
 
-        neumann_forces_pred.x.array[top_boundary_dofs_pred] = predictor.predict([u_k_pred.x.array])[0]
+        neumann_forces_pred.x.array[top_boundary_dofs_pred] = predictor.predict([u_k_pred.x.array[top_boundary_dofs_pred]])[0]
 
         L_pred = L_body_pred + dot(neumann_forces_pred, v_pred) * ds_pred(marker_pred)
 

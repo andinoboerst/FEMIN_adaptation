@@ -44,7 +44,7 @@ def train_predictor(version: int = 1) -> None:
     training_out = training_out.reshape(-1, training_out.shape[-1])
 
     X_train, X_test, y_train, y_test = train_test_split(
-        training_in, training_out, test_size=0.2, random_state=13
+        training_in, training_out, test_size=0.4, random_state=13
     )
 
     params = {
@@ -91,7 +91,7 @@ def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> Non
 
 
 if __name__ == "__main__":
-    version = 6
+    version = 7
     frequency = 1000
     simulate_only = True
 
