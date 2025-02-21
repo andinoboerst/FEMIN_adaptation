@@ -76,8 +76,8 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         boundary_nodes = locate_dofs_geometrical(self.V, boundary)
 
         if sort:
-            boundary_node_x_coords = np.array([self.mesh.geometry.x[node, 0] for node in boundary_nodes])
-            boundary_nodes_sorted_indices = np.argsort(boundary_node_x_coords)
+            boundary_node_coords = np.array([tuple(self.mesh.geometry.x[node]) for node in boundary_nodes], dtype=[('x', float), ('y', float), ('z', float)])
+            boundary_nodes_sorted_indices = np.argsort(boundary_node_coords, order=['x', 'y', 'z'])
             boundary_nodes = boundary_nodes[boundary_nodes_sorted_indices]
 
         return boundary_nodes

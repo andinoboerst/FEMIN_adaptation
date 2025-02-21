@@ -7,8 +7,6 @@ from shared.tct import TCTSimulation
 class TCTForceExtract(TCTSimulation):
 
     def _setup(self) -> None:
-        # self.top_boundary_nodes = self.get_boundary_nodes(self.top_boundary)
-
         self.add_dirichlet_bc(self.top_boundary, 2222)
 
         self.data_in = np.zeros((self.num_steps, len(self.interface_dofs)))
