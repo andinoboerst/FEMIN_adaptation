@@ -17,14 +17,14 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
     def __init__(self) -> None:
         pass
-    
+
     def plot_variables(self) -> dict:
         return {}
 
     # @abc.abstractmethod
     def _setup(self) -> None:
         pass
-    
+
     @abc.abstractmethod
     def _solve_time_step(self) -> None:
         raise NotImplementedError("Need to implement _solve_time_step()")
@@ -32,7 +32,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def _define_mesh(self) -> None:
         raise NotImplementedError("Need to implement _define_mesh()")
-    
+
     @abc.abstractmethod
     def _define_functionspace(self) -> None:
         raise NotImplementedError("Need to implement _define_functionspace()")
@@ -68,7 +68,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             boundary_node_x_coords = np.array([self.mesh.geometry.x[node, 0] for node in boundary_nodes])
             boundary_nodes_sorted_indices = np.argsort(boundary_node_x_coords)
             boundary_nodes = boundary_nodes[boundary_nodes_sorted_indices]
-        
+
         return boundary_nodes
 
     def get_boundary_dofs(self, boundary_nodes) -> np.array:
@@ -80,7 +80,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             boundary_dofs[self.dim * i:self.dim * i + self.dim] = dofs
 
         return boundary_dofs
-    
+
     def _setup_bcs(self) -> None:
         self._setup_dirichlet_bcs()
         self._setup_neumann_bcs()
@@ -118,13 +118,13 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
             for marker in self.neumann_bcs:
                 self.L += dot(self.neumann_bcs[marker][0], self.v) * self.ds(marker)
-    
+
     def add_dirichlet_bc(self, boundary, marker: int) -> None:
         self._dirichlet_bcs_list.append((boundary, marker))
 
     def add_neumann_bc(self, boundary, marker: int) -> None:
         self._neumann_bcs_list.append((boundary, marker))
-    
+
     def update_dirichlet_bc(self, values, marker: int) -> None:
         dirichlet = self.dirichlet_bcs[marker]
         dirichlet[0].x.array[dirichlet[1]] = values
@@ -187,17 +187,16 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
     def __init__(self) -> None:
         super().__init__()
-    
+
     def plot_variables(self) -> dict:
         return {
             "u": self.u_k.x.array.copy(),
             "v": self.v_k.x.array.copy(),
             "a": self.a_k.x.array.copy(),
         }
-    
+
     def _solve_time_step(self) -> None:
         self.solve_u()
-
 
     def setup(self) -> None:
         self.mu = self.E / (2.0 * (1.0 + self.nu))
@@ -211,7 +210,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self.sigma_projected = Function(self.W)
         self.w = TestFunction(self.W)
         self.tau = TrialFunction(self.W)
-    
+
     def _init_variables(self) -> None:
         self.u = TrialFunction(self.V)
         self.v = TestFunction(self.V)
@@ -238,11 +237,11 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self.u_prev.x.array[:] = self.u_k.x.array[:]
         self.v_prev.x.array[:] = self.v_k.x.array[:]
         self.a_prev.x.array[:] = self.a_k.x.array[:]
-    
+
     @staticmethod
     def epsilon(u):
         return 0.5 * (grad(u) + grad(u).T)
-    
+
     def sigma(self, u):
         return self.lmbda * tr(self.epsilon(u)) * Identity(self.dim) + 2 * self.mu * self.epsilon(u)
 
@@ -282,8 +281,8 @@ class StructuralElasticSimulation(FenicsxSimulation):
             sigma_yy = self.sigma_projected.x.array[4 * node + 3]
 
             # Compute the force components (accounting for element size)
-            node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1] #* element_size_y  # Fx
-            node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1] #* element_size_y  # Fy
+            node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1]
+            node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1]
 
         return node_forces
 
