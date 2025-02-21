@@ -4,11 +4,11 @@ from typing import Literal
 from mpi4py import MPI
 from dolfinx.mesh import create_rectangle, CellType
 
-from shared.fenicsx_sims import StructuralElasticSimulation, StructuralPlasticSimulation
+from shared.fenicsx_sims import FenicsxSimulation, StructuralElasticSimulation, StructuralPlasticSimulation
 from shared.progress_bar import progressbar
 
 
-class _TCTSimulation:
+class _TCTSimulation(FenicsxSimulation):
     # Bottom BC: Sinusoidal displacement (Time-dependent)
     amplitude = 5.0
 
@@ -40,8 +40,8 @@ class _TCTSimulation:
     def _init_variables(self) -> None:
         super()._init_variables()
 
-        self.interface_nodes = self.get_boundary_nodes(self.interface_boundary, sort=True)
-        self.interface_dofs = self.get_boundary_dofs(self.interface_nodes)
+        self.interface_nodes = self.get_nodes(self.interface_boundary, sort=True)
+        self.interface_dofs = self.get_dofs(self.interface_nodes)
 
         self.bottom_boundary_marker = 1111
         self.add_dirichlet_bc(self.bottom_boundary, self.bottom_boundary_marker)
@@ -89,23 +89,28 @@ def get_TCT_class(deformation: Literal["elastic", "plastic"] = "elastic"):
 def tct_comp(extractor: StructuralElasticSimulation, applicator: StructuralElasticSimulation, predictor) -> None:
 
     tct_real = extractor()
-    tct_real.time_total = 5e-4
+    tct_real.time_total = 2e-4
     tct_real.setup()
 
     tct_pred = applicator(predictor)
-    tct_pred.time_total = 5e-4
+    tct_pred.time_total = 2e-4
     tct_pred.setup()
 
     prediction_error = []
     for step in progressbar(range(tct_real.num_steps)):
         tct_real.step = step
         tct_pred.step = step
+        tct_real.advance_time()
+        tct_pred.advance_time()
 
         tct_real.solve_time_step()
         tct_pred.solve_time_step()
 
         prediction_error.append(tct_real.u_k.x.array[tct_real.interface_dofs] - tct_pred.u_k.x.array[tct_pred.interface_dofs])
 
-    bottom_half_dofs_real = tct_real.get_boundary_nodes(lambda x: x[1 < 25.4], sort=True)
+    bottom_half_nodes_real = tct_real.get_nodes(lambda x: x[1] < 25.4, sort=True)
 
-    return tct_real, tct_pred, prediction_error, bottom_half_dofs_real
+    tct_real.format_results()
+    tct_pred.format_results()
+
+    return tct_real, tct_pred, prediction_error, bottom_half_nodes_real

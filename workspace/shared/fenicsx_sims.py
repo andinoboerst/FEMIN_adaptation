@@ -72,8 +72,8 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         self.plot_results = {key: [] for key in self._plot_variables().keys()}
 
-    def get_boundary_nodes(self, boundary, sort: bool = False) -> np.array:
-        boundary_nodes = locate_dofs_geometrical(self.V, boundary)
+    def get_nodes(self, marker, sort: bool = False) -> np.array:
+        boundary_nodes = locate_dofs_geometrical(self.V, marker)
 
         if sort:
             boundary_node_coords = np.array([tuple(self.mesh.geometry.x[node]) for node in boundary_nodes], dtype=[('x', float), ('y', float), ('z', float)])
@@ -82,9 +82,9 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         return boundary_nodes
 
-    def get_boundary_dofs(self, boundary_nodes) -> np.array:
-        boundary_dofs = np.zeros(len(boundary_nodes) * self.dim, dtype=int)
-        for i, node in enumerate(boundary_nodes):
+    def get_dofs(self, nodes) -> np.array:
+        boundary_dofs = np.zeros(len(nodes) * self.dim, dtype=int)
+        for i, node in enumerate(nodes):
             dofs = [node * self.dim, node * self.dim + 1]
             if self.dim == 3:
                 dofs.append(node * self.dim + 2)
@@ -103,7 +103,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         for boundary, marker in self._dirichlet_bcs_list:
             nodes = locate_dofs_geometrical(self.V, boundary)
-            dofs = self.get_boundary_dofs(nodes)
+            dofs = self.get_dofs(nodes)
             func = Function(self.V)
             self.dirichlet_bcs[marker] = (func, dofs)
 
@@ -113,7 +113,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         self.neumann_bcs, facet_indices, facet_markers = {}, [], []
         fdim = self.mesh.topology.dim - 1
         for boundary, marker in self._neumann_bcs_list:
-            dofs = self.get_boundary_dofs(locate_dofs_geometrical(self.V, boundary))
+            dofs = self.get_dofs(locate_dofs_geometrical(self.V, boundary))
             self.neumann_bcs[marker] = (Function(self.V), dofs)
             facets = locate_entities(self.mesh, fdim, boundary)
             facet_indices.append(facets)
@@ -153,13 +153,22 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         if self.check_export_results():
             for key, res in self._plot_variables().items():
                 self.plot_results[key].append(res)
+    
+    def advance_time(self) -> None:
+        self.time += self.dt
 
     def run(self) -> None:
         self.setup()
 
         for self.step in progressbar(range(self.num_steps)):
-            self.time += self.dt
+            self.advance_time()
+
             self.solve_time_step()
+
+        self.format_results()
+
+    def format_results(self) -> None:
+        self.formatted_plot_results = {key: format_vectors_from_flat(res, n_dim=self.dim) for key, res in self.plot_results.items()}
 
     def postprocess(self, scalars: str = None, vectors: str = None, name: str = "result") -> None:
         variables = {}
@@ -193,8 +202,16 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         variable_names = set(variable_names)
 
+        try:
+            self.formatted_plot_results
+        except AttributeError:
+            self.format_results()
+
         for var in variable_names:
-            variables[var] = format_vectors_from_flat(self.plot_results[var], n_dim=self.dim)
+            if var in self.formatted_plot_results:
+                variables[var] = self.formatted_plot_results[var]  # format_vectors_from_flat(self.plot_results[var], n_dim=self.dim)
+            else:
+                logger.warning(f"Variable {var} not found in plot results.")
 
         if scalar_coord is None:
             scalar_value = variables.get(scalar_variable)
