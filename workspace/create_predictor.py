@@ -91,7 +91,7 @@ def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> Non
 if __name__ == "__main__":
     version = 8
     frequency = 1000
-    simulate_only = True
+    simulate_only = False
 
     try:
         os.mkdir(DATA_FOLDER)

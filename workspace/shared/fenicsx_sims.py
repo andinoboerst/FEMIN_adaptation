@@ -73,24 +73,24 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         self.plot_results = {key: [] for key in self._plot_variables().keys()}
 
     def get_nodes(self, marker, sort: bool = False) -> np.array:
-        boundary_nodes = locate_dofs_geometrical(self.V, marker)
+        nodes = locate_dofs_geometrical(self.V, marker)
 
         if sort:
-            boundary_node_coords = np.array([tuple(self.mesh.geometry.x[node]) for node in boundary_nodes], dtype=[('x', float), ('y', float), ('z', float)])
-            boundary_nodes_sorted_indices = np.argsort(boundary_node_coords, order=['x', 'y', 'z'])
-            boundary_nodes = boundary_nodes[boundary_nodes_sorted_indices]
+            node_coords = np.array([tuple(self.mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
+            nodes_sorted_indices = np.argsort(node_coords, order=['x', 'y', 'z'])
+            nodes = nodes[nodes_sorted_indices]
 
-        return boundary_nodes
+        return nodes
 
     def get_dofs(self, nodes) -> np.array:
-        boundary_dofs = np.zeros(len(nodes) * self.dim, dtype=int)
+        dofs = np.zeros(len(nodes) * self.dim, dtype=int)
         for i, node in enumerate(nodes):
-            dofs = [node * self.dim, node * self.dim + 1]
+            node_dofs = [node * self.dim, node * self.dim + 1]
             if self.dim == 3:
-                dofs.append(node * self.dim + 2)
-            boundary_dofs[self.dim * i:self.dim * i + self.dim] = dofs
+                node_dofs.append(node * self.dim + 2)
+            dofs[self.dim * i:self.dim * i + self.dim] = node_dofs
 
-        return boundary_dofs
+        return dofs
 
     def _setup_bcs(self) -> None:
         self._setup_dirichlet_bcs()
