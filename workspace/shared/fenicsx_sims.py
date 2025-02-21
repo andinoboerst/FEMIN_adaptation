@@ -162,28 +162,37 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             self.solve_time_step()
 
     def postprocess(self, scalars: str = None, vectors: str = None, name: str = "result") -> None:
+        variables = {}
         variable_names = []
         if scalars is not None:
-            split_string = scalars.split("_")
-            if len(split_string) == 2:
-                scalar_variable, scalar_coord = split_string
+            if isinstance(scalars, str):
+                split_string = scalars.split("_")
+                if len(split_string) == 2:
+                    scalar_variable, scalar_coord = split_string
+                else:
+                    scalar_variable = split_string[0]
+                    scalar_coord = None
+                variable_names.append(scalar_variable)
             else:
-                scalar_variable = split_string[0]
                 scalar_coord = None
-            variable_names.append(scalar_variable)
+                scalar_variable = "scalar_variable"
+                variables[scalar_variable] = scalars
         else:
             scalar_variable = None
             scalar_coord = None
 
         if vectors is not None:
-            vector_variable = vectors
-            variable_names.append(vector_variable)
+            if isinstance(vectors, str):
+                vector_variable = vectors
+                variable_names.append(vector_variable)
+            else:
+                vector_variable = "vector_variable"
+                variables[vector_variable] = vectors
         else:
             vector_variable = None
 
         variable_names = set(variable_names)
 
-        variables = {}
         for var in variable_names:
             variables[var] = format_vectors_from_flat(self.plot_results[var], n_dim=self.dim)
 

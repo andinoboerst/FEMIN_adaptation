@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 
-from tct.tct_elastic_force import TCTForceExtract, TCTForceApply
+from tct.tct_force import TCTForceExtract, TCTForceApply
 
 
 DATA_FOLDER = "results"

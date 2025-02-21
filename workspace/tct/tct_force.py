@@ -1,10 +1,13 @@
 import numpy as np
 import pickle
 
-from shared.tct import TCTSimulation
+from shared.tct import get_TCT_class
 
 
-class TCTForceExtract(TCTSimulation):
+DEFORMATION = "elastic"  # or plastic
+
+
+class TCTForceExtract(get_TCT_class(DEFORMATION)):
 
     def _setup(self) -> None:
         self.add_dirichlet_bc(self.top_boundary, 2222)
@@ -20,7 +23,7 @@ class TCTForceExtract(TCTSimulation):
         self.data_out[self.step, :] = self.calculate_forces(self.interface_nodes)
 
 
-class TCTForceApply(TCTSimulation):
+class TCTForceApply(get_TCT_class(DEFORMATION)):
 
     def __init__(self, predictor, frequency: int = 1000) -> None:
         self.predictor = predictor

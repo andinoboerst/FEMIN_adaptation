@@ -1,11 +1,11 @@
-import numpy as np
-import pickle
-
-from shared.tct import TCTSimulation
-from tct.tct_elastic_force import TCTForceExtract
+from tct.tct_force import TCTForceExtract
+from shared.tct import get_TCT_class
 
 
-class TCTForceApplyFixed(TCTSimulation):
+DEFORMATION = "elastic"  # or plastic
+
+
+class TCTForceApplyFixed(get_TCT_class(DEFORMATION)):
 
     def __init__(self, forces, frequency: int = 1000) -> None:
         self.pforces = forces
