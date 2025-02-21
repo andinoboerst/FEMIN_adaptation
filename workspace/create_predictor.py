@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 
-from tct.tct_force import TCTForceExtract, TCTForceApply
+from tct.tct_disp import TCTDispExtract, TCTDispApply
 
 
 DATA_FOLDER = "results"
@@ -20,7 +20,7 @@ def generate_training_set(version: int = 1):
     training_out = []
     for frequency in frequency_range:
         print("Running Simulation for frequency: ", frequency)
-        tct = TCTForceExtract(frequency)
+        tct = TCTDispExtract(frequency)
         tct.run()
     
         training_in.append(tct.data_in)
@@ -71,7 +71,7 @@ def apply_predictor(version: int = 1, frequency: int = 1000) -> None:
     with open(f"{DATA_FOLDER}/model_v{version:02}.pkl", "rb") as f:
         predictor = pickle.load(f)
     
-    tct = TCTForceApply(predictor, frequency)
+    tct = TCTDispApply(predictor, frequency)
     tct.run()
 
     with open(f"{DATA_FOLDER}/sim_results_v{version:02}.pkl", "wb") as f:
@@ -89,7 +89,7 @@ def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> Non
 
 
 if __name__ == "__main__":
-    version = 7
+    version = 8
     frequency = 1000
     simulate_only = True
 
