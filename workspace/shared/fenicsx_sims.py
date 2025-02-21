@@ -148,16 +148,27 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         for self.step in progressbar(range(self.num_steps)):
             self.time += self.dt
-            self.solve_time_step()            
+            self.solve_time_step()
 
     def postprocess(self, scalars: str = None, vectors: str = None, name: str = "result") -> None:
         variable_names = []
         if scalars is not None:
-            scalar_variable, scalar_coord = scalars.split("_")
+            split_string = scalars.split("_")
+            if len(split_string) == 2:
+                scalar_variable, scalar_coord = split_string
+            else:
+                scalar_variable = split_string[0]
+                scalar_coord = None
             variable_names.append(scalar_variable)
+        else:
+            scalar_variable = None
+            scalar_coord = None
+
         if vectors is not None:
             vector_variable = vectors
             variable_names.append(vector_variable)
+        else:
+            vector_variable = None
 
         variable_names = set(variable_names)
 
@@ -165,15 +176,17 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         for var in variable_names:
             variables[var] = format_vectors_from_flat(self.plot_results[var], n_dim=self.dim)
 
-        if scalar_coord == "x":
-            scalar_num = 0
+        if scalar_coord is None:
+            scalar_value = variables.get(scalar_variable)
+        elif scalar_coord == "x":
+            scalar_value = variables[scalar_variable][:, :, 0]
         elif scalar_coord == "y":
-            scalar_num = 1
+            scalar_value = variables[scalar_variable][:, :, 1]
         elif scalar_coord == "z":
-            scalar_num = 2
+            scalar_value = variables[scalar_variable][:, :, 2]
 
         plot_mesh = vtk_mesh(self.mesh)
-        create_mesh_animation(plot_mesh, variables[scalar_variable][:, :, scalar_num], variables[vector_variable], name=name)
+        create_mesh_animation(plot_mesh, scalar_value, variables.get(vector_variable), name=name)
 
 
 class StructuralElasticSimulation(FenicsxSimulation):
