@@ -5,8 +5,8 @@ from dolfinx.mesh import create_rectangle, CellType
 from dolfinx.plot import vtk_mesh
 from ufl import TestFunction, TrialFunction, Identity, grad, inner, tr, dx
 
-from misc.my_petsc import LinearProblem
-from misc.progress_bar import progressbar  # Assuming this is available
+from workspace.tct.archived.my_petsc import LinearProblem
+from workspace.shared.progress_bar import progressbar  # Assuming this is available
 
 
 class Predictor:
@@ -14,23 +14,21 @@ class Predictor:
         self.omega = omega
         self.shape = shape
 
+        with open("./tractions.npy", "rb") as f:
+            self.tractions = np.load(f)
+
     def predict(self, *args) -> np.ndarray:
         return self._predict(self._format_variables(*args))
 
-    def _format_variables(self, t, u, v) -> np.ndarray:
-        return t, np.append(u, v)
+    def _format_variables(self, n, u, v) -> np.ndarray:
+        return n, np.append(u, v)
 
     def _predict(self, x) -> np.ndarray:
-        node_force_magnitudes = np.zeros(self.shape)
-        sin_value = np.sin(self.omega * x[0])
-        value_y = - 500000 * sin_value
-        node_force_magnitudes[1::2] = value_y
-        node_force_magnitudes[0] = 50000 * sin_value
-        node_force_magnitudes[-2] = -50000 * sin_value
-        return node_force_magnitudes
+        n = x[0]
+        return self.tractions[n]
 
 
-def tct_elastic_reduced():
+def tct_elastic_reduced_fixed_tractions():
     # 1. Domain and Mesh (same as before)
     width = 100.0
     height = 25.0
@@ -125,7 +123,7 @@ def tct_elastic_reduced():
 
         force_vector = np.zeros(V.dofmap.index_map.size_global * V.dofmap.index_map_bs, dtype=np.float64) # Global force vector
 
-        node_force_magnitudes = predictor.predict(time, u_k.x.array, v_k.x.array)
+        node_force_magnitudes = predictor.predict(step, u_k.x.array, v_k.x.array)
         force_vector[top_boundary_dofs] = node_force_magnitudes
 
         bc_bottom = dirichletbc(bottom_displacement_function(time), bottom_boundary_nodes, V)
@@ -162,4 +160,4 @@ def tct_elastic_reduced():
 
 
 if __name__ == "__main__":
-    vtk_mesh_obj, u_full_data, v_full_data, interface_nodes = tct_elastic_reduced()
+    vtk_mesh_obj, u_full_data, v_full_data, interface_nodes = tct_elastic_reduced_fixed_tractions()

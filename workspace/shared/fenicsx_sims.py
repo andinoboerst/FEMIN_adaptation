@@ -1,13 +1,16 @@
 import abc
 import numpy as np
+import logging
 from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem
 from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx
 
-from misc.plotting import format_vectors_from_flat, create_mesh_animation
-from misc.progress_bar import progressbar
+from shared.plotting import format_vectors_from_flat, create_mesh_animation
+from shared.progress_bar import progressbar
+
+logger = logging.getLogger("fenicsx_sims")
 
 
 class FenicsxSimulation(metaclass=abc.ABCMeta):
@@ -18,8 +21,16 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     def __init__(self) -> None:
         pass
 
-    def plot_variables(self) -> dict:
+    def _plot_variables(self) -> dict:
         return {}
+    
+    @property
+    def plot_variables(self) -> list:
+        try:
+            return self.plot_results.keys()
+        except AttributeError:
+            logger.warning("Simulation has not been set up yet.")
+            return []
 
     # @abc.abstractmethod
     def _setup(self) -> None:
@@ -59,7 +70,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         self._setup_bcs()
 
-        self.plot_results = {key: [] for key in self.plot_variables().keys()}
+        self.plot_results = {key: [] for key in self._plot_variables().keys()}
 
     def get_boundary_nodes(self, boundary, sort: bool = False) -> np.array:
         boundary_nodes = locate_dofs_geometrical(self.V, boundary)
@@ -140,7 +151,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         self._solve_time_step()
 
         if self.check_export_results():
-            for key, res in self.plot_variables().items():
+            for key, res in self._plot_variables().items():
                 self.plot_results[key].append(res)
 
     def run(self) -> None:
@@ -184,6 +195,8 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             scalar_value = variables[scalar_variable][:, :, 1]
         elif scalar_coord == "z":
             scalar_value = variables[scalar_variable][:, :, 2]
+        elif scalar_coord == "norm":
+            scalar_value = np.linalg.norm(variables[scalar_variable], axis=-1)
 
         plot_mesh = vtk_mesh(self.mesh)
         create_mesh_animation(plot_mesh, scalar_value, variables.get(vector_variable), name=name)
@@ -201,7 +214,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
     def __init__(self) -> None:
         super().__init__()
 
-    def plot_variables(self) -> dict:
+    def _plot_variables(self) -> dict:
         return {
             "u": self.u_k.x.array.copy(),
             "v": self.v_k.x.array.copy(),

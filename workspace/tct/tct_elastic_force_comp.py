@@ -6,7 +6,7 @@ from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem
 from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx, FacetNormal
 
-from misc.progress_bar import progressbar  # Assuming this is available
+from shared.progress_bar import progressbar  # Assuming this is available
 
 
 def tct_elastic_generate_f_interface(frequency: int = 1000):
