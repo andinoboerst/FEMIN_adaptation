@@ -14,7 +14,7 @@ DATA_FOLDER = "workspace/results"
 
 
 def generate_training_set(version: int = 1):
-    frequency_range = range(500, 2001, int(1500/5))
+    frequency_range = range(500, 2001, int(1500 / 5))
 
     training_in = []
     training_out = []
@@ -22,7 +22,7 @@ def generate_training_set(version: int = 1):
         print("Running Simulation for frequency: ", frequency)
         tct = TCTDispExtract(frequency)
         tct.run()
-    
+
         training_in.append(tct.data_in)
         training_out.append(tct.data_out)
 
