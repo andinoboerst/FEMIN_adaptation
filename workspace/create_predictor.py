@@ -10,7 +10,7 @@ from sklearn.multioutput import MultiOutputRegressor
 from tct.tct_disp import TCTDispExtract, TCTDispApply
 
 
-DATA_FOLDER = "results"
+DATA_FOLDER = "workspace/results"
 
 
 def generate_training_set(version: int = 1):
@@ -91,7 +91,7 @@ def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> Non
 if __name__ == "__main__":
     version = 8
     frequency = 1000
-    simulate_only = False
+    simulate_only = True
 
     try:
         os.mkdir(DATA_FOLDER)

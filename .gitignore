@@ -1,3 +1,4 @@
 .ipynb*
 *_vtk
 *__pycache__
+.DS_Store
