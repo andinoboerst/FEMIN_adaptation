@@ -44,7 +44,7 @@ class TCTForceDeltaApply(get_TCT_class(DEFORMATION)):
 
     def _solve_time_step(self) -> None:
         current_forces = self.calculate_forces(self.interface_nodes)
-        predicted_force_delta = self.predictor.predict_one(self.u_k.x.array[self.interface_dofs] - self.u_prev.x.array[self.interface_dofs])
+        predicted_force_delta = self.predictor.predict(self.u_k.x.array[self.interface_dofs] - self.u_prev.x.array[self.interface_dofs])
         new_forces = current_forces + predicted_force_delta
         self.update_neumann_bc(new_forces, self.neumann_interface_marker)
 

@@ -40,7 +40,7 @@ class TCTForceApply(get_TCT_class(DEFORMATION)):
 
     def _solve_time_step(self) -> None:
 
-        self.update_neumann_bc(self.predictor.predict_one(self.u_k.x.array[self.interface_dofs]), self.neumann_interface_marker)
+        self.update_neumann_bc(self.predictor.predict(self.u_k.x.array[self.interface_dofs]), self.neumann_interface_marker)
 
         self.solve_u()
 

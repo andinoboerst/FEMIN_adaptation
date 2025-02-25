@@ -35,9 +35,6 @@ def train_predictor(version: int = 1) -> None:
 
     with open(f"{DATA_FOLDER}/training_out_v{version:02}.npy", "rb") as f:
         training_out = np.load(f)
-
-    training_in = training_in.reshape(-1, training_in.shape[-1])
-    training_out = training_out.reshape(-1, training_out.shape[-1])
     
     reg = GradientBoosting(training_in, training_out)
     reg.fit()

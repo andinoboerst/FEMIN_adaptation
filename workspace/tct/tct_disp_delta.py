@@ -45,7 +45,7 @@ class TCTDispDeltaApply(get_TCT_class(DEFORMATION)):
 
     def _solve_time_step(self) -> None:
         current_forces = self.calculate_forces(self.interface_nodes)
-        predicted_u_delta = self.predictor.predict_one(current_forces - self.forces_prev)
+        predicted_u_delta = self.predictor.predict(current_forces - self.forces_prev)
         self.forces_prev = current_forces
         
         u_interface = self.u_k.x.array[self.interface_dofs] + predicted_u_delta
