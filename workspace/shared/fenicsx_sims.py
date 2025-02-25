@@ -1,6 +1,8 @@
 import abc
 import numpy as np
 import logging
+import dill
+
 from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
@@ -51,6 +53,14 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def _init_variables(self) -> None:
         raise NotImplementedError("Need to implement _init_variables()")
+    
+    # def save(self, path: str) -> None:
+    #     with open(path, "wb") as f:
+    #         dill.dump(self, f)
+    
+    # def load(self, path: str) -> None:
+    #     with open(path, "rb") as f:
+    #         return dill.load(f)
 
     def setup(self) -> None:
         self._dirichlet_bcs_list = []
@@ -170,25 +180,26 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     def format_results(self) -> None:
         self.formatted_plot_results = {key: format_vectors_from_flat(res, n_dim=self.dim) for key, res in self.plot_results.items()}
 
-    def postprocess(self, scalars: str = None, vectors: str = None, name: str = "result") -> None:
+    def postprocess(self, scalars: str = None, vectors: str = None, scalar_process: str = None, name: str = "result") -> None:
         variables = {}
         variable_names = []
         if scalars is not None:
             if isinstance(scalars, str):
-                split_string = scalars.split("_")
-                if len(split_string) == 2:
-                    scalar_variable, scalar_coord = split_string
-                else:
-                    scalar_variable = split_string[0]
-                    scalar_coord = None
+                # split_string = scalars.split("_")
+                # if len(split_string) == 2:
+                #     scalar_variable, scalar_process = split_string
+                # else:
+                #     scalar_variable = split_string[0]
+                #     scalar_process = None
+                scalar_variable = scalars
                 variable_names.append(scalar_variable)
             else:
-                scalar_coord = None
+                # scalar_process = None
                 scalar_variable = "scalar_variable"
                 variables[scalar_variable] = scalars
         else:
             scalar_variable = None
-            scalar_coord = None
+            scalar_process = None
 
         if vectors is not None:
             if isinstance(vectors, str):
@@ -213,15 +224,15 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             else:
                 logger.warning(f"Variable {var} not found in plot results.")
 
-        if scalar_coord is None:
+        if scalar_process is None:
             scalar_value = variables.get(scalar_variable)
-        elif scalar_coord == "x":
+        elif scalar_process == "x":
             scalar_value = variables[scalar_variable][:, :, 0]
-        elif scalar_coord == "y":
+        elif scalar_process == "y":
             scalar_value = variables[scalar_variable][:, :, 1]
-        elif scalar_coord == "z":
+        elif scalar_process == "z":
             scalar_value = variables[scalar_variable][:, :, 2]
-        elif scalar_coord == "norm":
+        elif scalar_process == "norm":
             scalar_value = np.linalg.norm(variables[scalar_variable], axis=-1)
 
         plot_mesh = vtk_mesh(self.mesh)

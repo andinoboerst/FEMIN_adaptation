@@ -7,7 +7,7 @@ RUN apt-get install --fix-missing -y xvfb
 
 RUN pip install --upgrade pip
 
-RUN pip install matplotlib pyvista[jupyter] trame trame-vtk jupyter imageio imageio[ffmpeg] scikit-learn
+RUN pip install matplotlib pyvista[jupyter] trame trame-vtk jupyter imageio imageio[ffmpeg] scikit-learn torch dill
 
 # Set the working directory to /workspace
 WORKDIR /workspace

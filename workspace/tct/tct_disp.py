@@ -40,7 +40,7 @@ class TCTDispApply(get_TCT_class(DEFORMATION)):
     def _solve_time_step(self) -> None:
         interface_node_forces = self.calculate_forces(self.interface_nodes)
 
-        prediction = self.predictor.predict([interface_node_forces])[0]
+        prediction = self.predictor.predict_one(interface_node_forces)
 
         self.update_dirichlet_bc(prediction, self.interface_marker)
 

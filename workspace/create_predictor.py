@@ -2,25 +2,21 @@ import numpy as np
 import pickle
 import os
 
-from sklearn import ensemble
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import train_test_split
-from sklearn.multioutput import MultiOutputRegressor
-
-from tct.tct_disp import TCTDispExtract, TCTDispApply
+from tct.tct_force import TCTForceExtract as extractor, TCTForceApply as applicator
+from predictors.gradient_boosting import GradientBoosting
 
 
-DATA_FOLDER = "workspace/results"
+DATA_FOLDER = "results"
 
 
 def generate_training_set(version: int = 1):
-    frequency_range = range(500, 2001, int(1500 / 5))
+    frequency_range = range(500, 2001, int(1500 / 3))
 
     training_in = []
     training_out = []
     for frequency in frequency_range:
         print("Running Simulation for frequency: ", frequency)
-        tct = TCTDispExtract(frequency)
+        tct = extractor(frequency)
         tct.run()
 
         training_in.append(tct.data_in)
@@ -42,42 +38,28 @@ def train_predictor(version: int = 1) -> None:
 
     training_in = training_in.reshape(-1, training_in.shape[-1])
     training_out = training_out.reshape(-1, training_out.shape[-1])
+    
+    reg = GradientBoosting(training_in, training_out)
+    reg.fit()
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        training_in, training_out, test_size=0.4, random_state=13
-    )
-
-    params = {
-        "n_estimators": 500,
-        "max_depth": 4,
-        "min_samples_split": 5,
-        "learning_rate": 0.01,
-        "loss": "squared_error",
-    }
-
-    print("Fitting data to predictor model...")
-
-    reg = MultiOutputRegressor(ensemble.GradientBoostingRegressor(**params), n_jobs=5)
-    reg.fit(X_train, y_train)
-
-    mse = mean_squared_error(y_test, reg.predict(X_test))
-    print("The mean squared error (MSE) on test set: {:.4f}".format(mse))
-
-    with open(f"{DATA_FOLDER}/model_v{version:02}.pkl", "wb") as f:
-        pickle.dump(reg, f)
+    reg.save(f"{DATA_FOLDER}/model_v{version:02}.pkl")
 
 
 def apply_predictor(version: int = 1, frequency: int = 1000) -> None:
-    with open(f"{DATA_FOLDER}/model_v{version:02}.pkl", "rb") as f:
-        predictor = pickle.load(f)
-    
-    tct = TCTDispApply(predictor, frequency)
+    predictor = GradientBoosting.load(f"{DATA_FOLDER}/model_v{version:02}.pkl")
+
+    with open(f"{DATA_FOLDER}/model_forces.pkl", "rb") as f:
+        model = pickle.load(f)
+
+    predictor._model = model
+
+    tct = applicator(predictor, frequency)
+    tct.time_total = 2e-4
     tct.run()
 
-    with open(f"{DATA_FOLDER}/sim_results_v{version:02}.pkl", "wb") as f:
-        pickle.dump(tct, f)
+    # tct.save(f"{DATA_FOLDER}/sim_results_v{version:02}.pkl")
 
-    tct.postprocess("u_y", "u", name=f"{DATA_FOLDER}/prediction_v{version:02}")
+    tct.postprocess("u", "u", "y", name=f"{DATA_FOLDER}/prediction_v{version:02}")
 
 
 def run(version: int, frequency: int = 1000, simulate_only: bool = False) -> None:
