@@ -109,8 +109,9 @@ def tct_comp(extractor: StructuralElasticSimulation, applicator: StructuralElast
         prediction_error.append(tct_real.u_k.x.array[tct_real.interface_dofs] - tct_pred.u_k.x.array[tct_pred.interface_dofs])
 
     bottom_half_nodes_real = tct_real.get_nodes(lambda x: x[1] < 25.4, sort=True)
+    bottom_half_nodes_pred = tct_pred.get_nodes(lambda x: x[1] < 25.4, sort=True)
 
     tct_real.format_results()
     tct_pred.format_results()
 
-    return tct_real, tct_pred, prediction_error, bottom_half_nodes_real
+    return tct_real, tct_pred, prediction_error, bottom_half_nodes_real, bottom_half_nodes_pred
