@@ -25,11 +25,15 @@ def create_mesh_animation(mesh, scalars=None, vectors=None, name: str = "result"
 
     show_scalar_bar = True
 
+    time_steps = 0
+
     if scalars is None:
         show_scalar_bar = False
         scalars = np.zeros((len(vectors), len(vectors[0])))
+        time_steps = len(vectors)
     elif vectors is None:
         vectors = np.zeros((len(scalars), len(scalars[0]), 3))
+        time_steps = len(scalars)
 
     viridis = plt.get_cmap("viridis", 25)
     sargs = dict(
@@ -70,7 +74,6 @@ def create_mesh_animation(mesh, scalars=None, vectors=None, name: str = "result"
         **grid_props,
     )
 
-    time_steps = len(scalars) * 100
     text = plotter.add_text(text=f"0/{time_steps}", position="lower_left", font_size=8)
 
     plotter.view_xy()
