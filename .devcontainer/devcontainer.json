@@ -27,7 +27,8 @@
             "codeium.codeium",  // Codeium
             "ms-azuretools.vscode-docker",  // Docker extension
             "ms-python.black-formatter",  // Black extension
-            "bierner.gif-player"  // gif player
+            "bierner.gif-player",  // gif player
+            "ms-python.flake8"  // Flake8 extension
         ]
       }
     }

@@ -49,7 +49,7 @@ class LSTMNetwork(FenicsxPredictor):
             h0 = h0.detach()
             c0 = c0.detach()
 
-            if (epoch+1) % 10 == 0:
+            if (epoch + 1) % 10 == 0:
                 print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
 
         # Predicted outputs
@@ -73,14 +73,11 @@ class LSTMNetwork(FenicsxPredictor):
     def start_prediction_cycle(self) -> None:
         self.h = None
         self.c = None
-    
+
     def predict(self, x: np.ndarray) -> np.ndarray:
         predicted, self.h, self.c = self._model(x, self.h, self.c)
 
         return predicted
-
-
-
 
 
 def prepare_sequence(seq, to_ix):
@@ -101,7 +98,7 @@ class LSTMModel(nn.Module):
         if h0 is None or c0 is None:
             h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
             c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
-        
+
         # Forward pass through LSTM
         out, (hn, cn) = self.lstm(x, (h0, c0))
         out = self.fc(out[:, -1, :])  # Selecting the last output

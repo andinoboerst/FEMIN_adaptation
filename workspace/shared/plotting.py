@@ -19,11 +19,10 @@ def format_vectors_from_flat(u: np.ndarray, n_dim: int = 2) -> np.ndarray:
     return np.array([u_x, u_y, u_z]).transpose(1, 2, 0)
 
 
-
-def create_mesh_animation(mesh, scalars=None, vectors=None, name: str="result", **kwargs) -> None:
+def create_mesh_animation(mesh, scalars=None, vectors=None, name: str = "result", **kwargs) -> None:
     if scalars is None and vectors is None:
         raise ValueError("Either scalars or vectors must be provided")
-    
+
     show_scalar_bar = True
 
     if scalars is None:
@@ -62,7 +61,6 @@ def create_mesh_animation(mesh, scalars=None, vectors=None, name: str="result", 
     grid_base['vectors'] = vectors[0]
     grid_base.set_active_vectors('vectors')
     grid = grid_base.warp_by_vector()
-
 
     plotter = pv.Plotter()
     plotter.open_gif(f"{name}.gif")

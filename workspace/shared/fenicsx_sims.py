@@ -25,7 +25,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
     def _plot_variables(self) -> dict:
         return {}
-    
+
     @property
     def plot_variables(self) -> list:
         try:
@@ -53,11 +53,11 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def _init_variables(self) -> None:
         raise NotImplementedError("Need to implement _init_variables()")
-    
+
     # def save(self, path: str) -> None:
     #     with open(path, "wb") as f:
     #         dill.dump(self, f)
-    
+
     # def load(self, path: str) -> None:
     #     with open(path, "rb") as f:
     #         return dill.load(f)
@@ -163,7 +163,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         if self.check_export_results():
             for key, res in self._plot_variables().items():
                 self.plot_results[key].append(res)
-    
+
     def advance_time(self) -> None:
         self.time += self.dt
 

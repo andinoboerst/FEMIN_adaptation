@@ -35,7 +35,7 @@ def train_predictor(version: int = 1) -> None:
 
     with open(f"{DATA_FOLDER}/training_out_v{version:02}.npy", "rb") as f:
         training_out = np.load(f)
-    
+
     reg = GradientBoosting(training_in, training_out)
     reg.fit()
 
@@ -78,5 +78,5 @@ if __name__ == "__main__":
         print("Folder already exists.")
 
     # train_predictor(version)
-    
+
     run(version, frequency, simulate_only)
