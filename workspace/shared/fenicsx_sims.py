@@ -1,7 +1,7 @@
 import abc
 import numpy as np
 import logging
-import dill
+# import dill
 
 from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
 from dolfinx.mesh import meshtags, locate_entities
@@ -270,9 +270,6 @@ class StructuralElasticSimulation(FenicsxSimulation):
     def _define_functionspace(self) -> None:
         self.V = functionspace(self.mesh, ("CG", 1, (2,)))
         self.W = functionspace(self.mesh, ("CG", 1, (2, 2)))
-        self.sigma_projected = Function(self.W)
-        self.w = TestFunction(self.W)
-        self.tau = TrialFunction(self.W)
 
     def _init_variables(self) -> None:
         self.u = TrialFunction(self.V)
@@ -287,6 +284,10 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self.v_prev = Function(self.V)
         self.a_k = Function(self.V, name="Acceleration")
         self.a_prev = Function(self.V)
+
+        self.sigma_projected = Function(self.W)
+        self.w = TestFunction(self.W)
+        self.tau = TrialFunction(self.W)
 
         # Initialize displacement and acceleration to zero
         self.u_k.x.array[:] = 0.0

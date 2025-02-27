@@ -49,4 +49,3 @@ if __name__ == "__main__":
     tct_real, tct_pred, prediction_error, bottom_half_nodes_real, bottom_half_nodes_pred = tct_force_comp(TCTDispExtract, TCTDispApplyFixed)
 
     tct_real.postprocess(prediction_error, "u", "norm", "disps_force_error")
-

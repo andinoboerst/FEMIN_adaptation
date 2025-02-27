@@ -62,10 +62,10 @@ class _TCTSimulation(FenicsxSimulation):
     def interface_boundary(x):
         return np.isclose(x[1], 25.0)
 
-    def solve_time_step(self):
+    def solve_time_step(self) -> None:
         self.update_dirichlet_bc(self._bottom_displacement_function(self.time), self.bottom_boundary_marker)
 
-        return super().solve_time_step()
+        super().solve_time_step()
 
 
 class TCTElastic(_TCTSimulation, StructuralElasticSimulation):

@@ -50,7 +50,7 @@ def train_lstm(version: int = 1) -> None:
     with open(f"{DATA_FOLDER}/training_out_v{version:02}.npy", "rb") as f:
         training_out = np.load(f)
 
-    reg = LSTMWindowNetwork(training_in, training_out)
+    reg = LSTMNetwork(training_in, training_out)
     reg.fit()
 
     reg.save(f"{DATA_FOLDER}/model_v{version:02}.pkl")
@@ -75,7 +75,7 @@ def apply_gradient_boosting(version: int = 1, frequency: int = 1000) -> None:
 
 
 def apply_lstm(version: int = 1, frequency: int = 1000) -> None:
-    predictor = LSTMWindowNetwork.load(f"{DATA_FOLDER}/model_v{version:02}.pkl")
+    predictor = LSTMNetwork.load(f"{DATA_FOLDER}/model_v{version:02}.pkl")
 
     predictor.initialize_memory_variables()
     tct = applicator(predictor, frequency)
