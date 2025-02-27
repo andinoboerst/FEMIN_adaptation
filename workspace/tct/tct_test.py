@@ -1,6 +1,6 @@
 import numpy as np
 
-from ufl import TrialFunction, inner, dx, Measure, dot
+from ufl import TrialFunction, inner, dx, Measure
 from dolfinx.fem import Function, Constant, dirichletbc
 from dolfinx.fem.petsc import LinearProblem
 from dolfinx.mesh import meshtags, locate_entities
@@ -30,116 +30,6 @@ class TCTSolveDisp(get_TCT_class("elastic")):
 
 
 class TCTSolveForce(get_TCT_class("elastic")):
-
-    @property
-    def height(self) -> float:
-        return 25.0
-
-    def _plot_variables(self) -> None:
-        return {
-            "u": self.u_k.x.array.copy(),
-        }
-
-    def _init_variables(self) -> None:
-        super()._init_variables()
-
-        self.u_k = Function(self.V)
-        self.f_tilde = TrialFunction(self.V)
-        self.f_res = Function(self.V)
-
-        self.a = inner(self.f_tilde, self.v) * dx
-        self.L = inner(self.sigma(self.u_k), self.epsilon(self.v)) * dx - inner(self.f, self.v) * dx
-
-        self.f_res.x.array[:] = 0.0
-
-        self.bottom_half_nodes = self.get_nodes(lambda x: x[1] < 25.4, sort=True)
-        self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
-
-    def _setup(self) -> None:
-        super()._setup()
-
-        # self.data_out = np.zeros((self.num_steps, len(self.interface_dofs)))
-        self.data_out = np.zeros((self.num_steps, len(self.f_res.x.array)))
-
-    def _solve_time_step(self) -> None:
-        self.u_k.x.array[self.bottom_half_dofs] = self.u_set
-
-        problem = LinearProblem(self.a, self.L, bcs=self.current_dirichlet_bcs, u=self.f_res)
-        self.f_res = problem.solve()
-
-        # self.data_out[self.step, :] = self.f_res.x.array[self.interface_dofs]
-        self.data_out[self.step, :] = self.f_res.x.array
-
-
-class TCTSolveForceInterface(get_TCT_class("elastic")):
-
-    @property
-    def height(self) -> float:
-        return 25.0
-
-    def _plot_variables(self) -> None:
-        return {
-            "u": self.u_k.x.array.copy(),
-        }
-
-    @staticmethod
-    def not_interface_boundary(x):
-        return ~np.isclose(x[1], 25.0)
-
-    def _init_variables(self) -> None:
-        super()._init_variables()
-
-        interface_marker = 88
-        non_interface_marker = 99
-        markers = [
-            (self.interface_boundary, interface_marker),
-            (self.not_interface_boundary, non_interface_marker),
-        ]
-
-        facet_indices, facet_markers = [], []
-
-        fdim = self.mesh.topology.dim - 1
-
-        for boundary, marker in markers:
-            facets = locate_entities(self.mesh, fdim, boundary)
-            facet_indices.append(facets)
-            facet_markers.append(np.full_like(facets, marker))
-
-        facet_indices = np.hstack(facet_indices).astype(np.int32)
-        facet_markers = np.hstack(facet_markers).astype(np.int32)
-        sorted_facets = np.argsort(facet_indices)
-        facet_tag = meshtags(self.mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
-
-        ds = Measure("ds", domain=self.mesh, subdomain_data=facet_tag)
-
-        self.u_k = Function(self.V)
-        self.f_tilde = TrialFunction(self.V)
-        self.f_res = Function(self.V)
-
-        self.a = inner(self.f_tilde, self.v) * ds(interface_marker)
-        self.L = inner(self.sigma(self.u_k), self.epsilon(self.v)) * ds(interface_marker)
-        # self.L = inner(self.sigma(self.u_k), self.epsilon(self.v)) * dx - inner(self.f, self.v) * dx
-
-        self.f_res.x.array[:] = 0.0
-
-        self.bottom_half_nodes = self.get_nodes(lambda x: x[1] < 25.4, sort=True)
-        self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
-
-    def _setup(self) -> None:
-        super()._setup()
-
-        self.data_out = np.zeros((self.num_steps, len(self.interface_dofs)))
-
-    def _solve_time_step(self) -> None:
-        self.u_k.x.array[self.bottom_half_dofs] = self.u_set
-
-        problem = LinearProblem(self.a, self.L, bcs=self.current_dirichlet_bcs, u=self.f_res)
-        self.f_res = problem.solve()
-
-        self.data_out[self.step, :] = self.f_res.x.array[self.interface_dofs]
-
-
-class TCTSolveForceTest(get_TCT_class("elastic")):
 
     @property
     def height(self) -> float:
@@ -215,65 +105,9 @@ class TCTSolveForceTest(get_TCT_class("elastic")):
         self.data_out[self.step, :] = self.f_res.x.array[self.interface_dofs]
 
 
-class TCTApplyForce(get_TCT_class("elastic")):
-
-    def __init__(self, forces, frequency: int = 1000) -> None:
-        self.forces = forces
-        super().__init__(frequency)
-
-    @property
-    def height(self) -> float:
-        return 25.0
-
-    def _init_variables(self) -> None:
-        super()._init_variables()
-
-        self.f_res = Function(self.V)
-
-        self.L += inner(self.f_res, self.v) * dx
-
-    def _setup(self) -> None:
-
-        self.bottom_half_nodes = self.get_nodes(lambda x: x[1] < 25.4, sort=True)
-        self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
-
-    def _solve_time_step(self):
-        self.f_res.x.array[:] = self.forces[self.step]
-
-        self.solve_u()
-
-
-class TCTApplyForceTest(get_TCT_class("elastic")):
-
-    def __init__(self, forces, frequency: int = 1000) -> None:
-        self.forces = forces
-        super().__init__(frequency)
-
-    @property
-    def height(self) -> float:
-        return 25.0
-
-    def _init_variables(self) -> None:
-        super()._init_variables()
-
-        self.f_res = Function(self.V)
-
-        self.L += inner(self.f_res, self.v) * dx
-
-    def _setup(self) -> None:
-
-        self.bottom_half_nodes = self.get_nodes(lambda x: x[1] < 25.4, sort=True)
-        self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
-
-    def _solve_time_step(self):
-        self.f_res.x.array[self.interface_dofs] = self.forces[self.step]
-
-        self.solve_u()
-
-
 def tct_extraction() -> None:
     tct_d = TCTSolveDisp()
-    tct_f = TCTSolveForceTest()
+    tct_f = TCTSolveForce()
 
     tct_d.setup()
     tct_f.setup()
