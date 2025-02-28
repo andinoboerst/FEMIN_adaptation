@@ -5,9 +5,31 @@ from dolfinx.fem import Function, Constant, dirichletbc
 from dolfinx.fem.petsc import LinearProblem
 from dolfinx.mesh import meshtags, locate_entities
 
-from shared.tct import get_TCT_class
-from shared.progress_bar import progressbar
+from shared.tct import get_TCT_class, get_TCT_class_tractions
+# from shared.progress_bar import progressbar
 from tct.tct_force_comp import TCTForceApplyFixed
+
+
+class TCTSolveTractions(get_TCT_class_tractions("elastic")):
+
+    def _setup(self) -> None:
+        super()._setup()
+
+        self.bottom_half_nodes = self.get_nodes(lambda x: x[1] < 25.4, sort=True)
+        self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
+
+        self.not_interface_nodes = self.get_nodes(lambda x: x[1] < 24.6, sort=True)
+        self.not_interface_dofs = self.get_dofs(self.not_interface_nodes)
+
+        self.data_in = np.zeros((self.num_steps, len(self.interface_dofs)))
+        self.data_out = np.zeros((self.num_steps, len(self.interface_dofs)))
+
+    def _solve_time_step(self):
+        self.data_in[self.step, :] = self.u_k.x.array[self.interface_dofs]
+
+        self.solve_u()
+
+        self.data_out[self.step, :] = self.calculate_interface_tractions()
 
 
 class TCTSolveDisp(get_TCT_class("elastic")):
@@ -106,45 +128,59 @@ class TCTSolveForce(get_TCT_class("elastic")):
 
 
 def tct_extraction() -> None:
-    tct_d = TCTSolveDisp()
-    tct_f = TCTSolveForce()
+    tct = TCTSolveTractions()
+    tct.run()
 
-    tct_d.setup()
-    tct_f.setup()
+    tct.postprocess("u", "u", "y", "tractions_full")
 
-    for step in progressbar(range(tct_d.num_steps)):
-        tct_d.step = step
-        tct_f.step = step
-
-        tct_d.advance_time()
-
-        tct_d.solve_time_step()
-
-        tct_f.u_set = tct_d.u_k.x.array[tct_d.bottom_half_dofs].copy()
-        tct_f.solve_time_step()
-
-    tct_d.format_results()
-    tct_f.format_results()
-
-    return tct_d, tct_f
-
-
-if __name__ == "__main__":
-    tct_d, tct_f = tct_extraction()
-
-    tct_f.postprocess("u", "u", "y", "forces_half")
-
-    u_k_error = np.zeros(tct_d.formatted_plot_results["u"].shape)
-    u_k_error[:, tct_d.bottom_half_nodes, :] = tct_d.formatted_plot_results["u"][:, tct_d.bottom_half_nodes, :] - tct_f.formatted_plot_results["u"][:, tct_f.bottom_half_nodes, :]
-    tct_d.postprocess(u_k_error, "u", "norm", "forces_error_test")
-
-    tct_apply = TCTForceApplyFixed(tct_f.data_out)
+    tct_apply = TCTForceApplyFixed(tct.data_out)
     tct_apply.run()
 
     tct_apply.bottom_half_nodes = tct_apply.get_nodes(lambda x: x[1] < 25.4, sort=True)
 
-    tct_apply.postprocess("u", "u", "y", "forces_app")
+    tct_apply.postprocess("u", "u", "y", "tractions_applied")
 
-    u_k_app_error = np.zeros(tct_d.formatted_plot_results["u"].shape)
-    u_k_app_error[:, tct_d.bottom_half_nodes, :] = tct_d.formatted_plot_results["u"][:, tct_d.bottom_half_nodes, :] - tct_apply.formatted_plot_results["u"][:, tct_apply.bottom_half_nodes, :]
-    tct_d.postprocess(u_k_app_error, "u", "norm", "forces_error_app")
+    u_k_app_error = np.zeros(tct.formatted_plot_results["u"].shape)
+    u_k_app_error[:, tct.bottom_half_nodes, :] = tct.formatted_plot_results["u"][:, tct.bottom_half_nodes, :] - tct_apply.formatted_plot_results["u"][:, tct_apply.bottom_half_nodes, :]
+    tct.postprocess(u_k_app_error, "u", "norm", "tractions_applied_error")
+
+    # tct_d = TCTSolveDisp()
+    # tct_f = TCTSolveForce()
+
+    # tct_d.setup()
+    # tct_f.setup()
+
+    # for step in progressbar(range(tct_d.num_steps)):
+    #     tct_d.step = step
+    #     tct_f.step = step
+
+    #     tct_d.advance_time()
+
+    #     tct_d.solve_time_step()
+
+    #     tct_f.u_set = tct_d.u_k.x.array[tct_d.bottom_half_dofs].copy()
+    #     tct_f.solve_time_step()
+
+    # tct_d.format_results()
+    # tct_f.format_results()
+
+    # tct_f.postprocess("u", "u", "y", "forces_half")
+
+    # u_k_error = np.zeros(tct_d.formatted_plot_results["u"].shape)
+    # u_k_error[:, tct_d.bottom_half_nodes, :] = tct_d.formatted_plot_results["u"][:, tct_d.bottom_half_nodes, :] - tct_f.formatted_plot_results["u"][:, tct_f.bottom_half_nodes, :]
+    # tct_d.postprocess(u_k_error, "u", "norm", "forces_error_test")
+
+    # tct_apply = TCTForceApplyFixed(tct_f.data_out)
+    # tct_apply.run()
+
+    # tct_apply.bottom_half_nodes = tct_apply.get_nodes(lambda x: x[1] < 25.4, sort=True)
+
+    # tct_apply.postprocess("u", "u", "y", "forces_app")
+
+    # u_k_app_error = np.zeros(tct_d.formatted_plot_results["u"].shape)
+    # u_k_app_error[:, tct_d.bottom_half_nodes, :] = tct_d.formatted_plot_results["u"][:, tct_d.bottom_half_nodes, :] - tct_apply.formatted_plot_results["u"][:, tct_apply.bottom_half_nodes, :]
+    # tct_d.postprocess(u_k_app_error, "u", "norm", "forces_error_app")
+
+
+if __name__ == "__main__":
+    tct_extraction()

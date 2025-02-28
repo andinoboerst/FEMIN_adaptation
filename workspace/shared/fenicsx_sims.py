@@ -54,6 +54,10 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     def _init_variables(self) -> None:
         raise NotImplementedError("Need to implement _init_variables()")
 
+    @abc.abstractmethod
+    def _define_differential_equations(self) -> None:
+        raise NotImplementedError("Need to implement _define_differential_equations()")
+
     # def save(self, path: str) -> None:
     #     with open(path, "wb") as f:
     #         dill.dump(self, f)
@@ -80,13 +84,20 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         self._setup_bcs()
 
+        self._define_differential_equations()
+
         self.plot_results = {key: [] for key in self._plot_variables().keys()}
 
-    def get_nodes(self, marker, sort: bool = False) -> np.array:
-        nodes = locate_dofs_geometrical(self.V, marker)
+    def get_nodes(self, marker, sort: bool = False, V=None) -> np.array:
+        if V is None:
+            V = self.V
+
+        mesh = V.mesh
+
+        nodes = locate_dofs_geometrical(V, marker)
 
         if sort:
-            node_coords = np.array([tuple(self.mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
+            node_coords = np.array([tuple(mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
             nodes_sorted_indices = np.argsort(node_coords, order=['x', 'y', 'z'])
             nodes = nodes[nodes_sorted_indices]
 
@@ -107,51 +118,101 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         self._setup_neumann_bcs()
 
     def _setup_dirichlet_bcs(self) -> None:
-        self.current_dirichlet_bcs = []
+        self._applied_dirichlet_bcs = ([], [])
 
-        self.dirichlet_bcs = {}
+        self._dirichlet_bcs = {}
 
-        for boundary, marker in self._dirichlet_bcs_list:
-            nodes = locate_dofs_geometrical(self.V, boundary)
+        for boundary, marker, V in self._dirichlet_bcs_list:
+            nodes = locate_dofs_geometrical(V, boundary)
             dofs = self.get_dofs(nodes)
-            func = Function(self.V)
-            self.dirichlet_bcs[marker] = (func, dofs)
+            func = Function(V)
+            self._dirichlet_bcs[marker] = (func, dofs)
 
-            self.current_dirichlet_bcs.append(dirichletbc(func, nodes))
+            if V not in self._applied_dirichlet_bcs[0]:
+                self._applied_dirichlet_bcs[0].append(V)
+                self._applied_dirichlet_bcs[1].append([])
+
+            i = self._applied_dirichlet_bcs[0].index(V)
+            self._applied_dirichlet_bcs[1][i].append(dirichletbc(func, nodes))
+
+    def get_dirichlet_bcs(self, V=None):
+        if V is None:
+            V = self.V
+
+        try:
+            index = self._applied_dirichlet_bcs[0].index(V)
+            return self._applied_dirichlet_bcs[1][index]
+        except ValueError:
+            return []
 
     def _setup_neumann_bcs(self) -> None:
-        self.neumann_bcs, facet_indices, facet_markers = {}, [], []
-        fdim = self.mesh.topology.dim - 1
-        for boundary, marker in self._neumann_bcs_list:
-            dofs = self.get_dofs(locate_dofs_geometrical(self.V, boundary))
-            self.neumann_bcs[marker] = (Function(self.V), dofs)
-            facets = locate_entities(self.mesh, fdim, boundary)
-            facet_indices.append(facets)
-            facet_markers.append(np.full_like(facets, marker))
+        self._neumann_bcs, facet_info = {}, {}
+        for boundary, marker, V in self._neumann_bcs_list:
+            mesh = V.mesh
+            fdim = mesh.topology.dim - 1
+            dofs = self.get_dofs(locate_dofs_geometrical(V, boundary))
+            self._neumann_bcs[marker] = (Function(V), dofs)
+            facets = locate_entities(mesh, fdim, boundary)
+            if mesh not in facet_info:
+                facet_info[mesh] = (
+                    [],
+                    [],
+                    [],
+                    V
+                )
 
-        if len(self._neumann_bcs_list) > 0:
-            facet_indices = np.hstack(facet_indices).astype(np.int32)
-            facet_markers = np.hstack(facet_markers).astype(np.int32)
+            facet_info[mesh][0].append(facets)
+            facet_info[mesh][1].append(np.full_like(facets, marker))
+            facet_info[mesh][2].append(marker)
+
+        self._applied_neumann_bcs = ([], [])
+        for mesh, facet_info in facet_info.items():
+            dx_ = Measure("dx", domain=mesh)
+            v = TestFunction(V)
+            L = inner(Constant(mesh, np.array([0.0] * self.dim)), v) * dx_
+            facet_indices = np.hstack(facet_info[0]).astype(np.int32)
+            facet_markers = np.hstack(facet_info[1]).astype(np.int32)
             sorted_facets = np.argsort(facet_indices)
-            facet_tag = meshtags(self.mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
+            facet_tag = meshtags(mesh, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
 
-            self.ds = Measure("ds", domain=self.mesh, subdomain_data=facet_tag)
+            ds = Measure("ds", domain=mesh, subdomain_data=facet_tag)
 
-            for marker in self.neumann_bcs:
-                self.L += dot(self.neumann_bcs[marker][0], self.v) * self.ds(marker)
+            for marker in facet_info[2]:
+                L += dot(self._neumann_bcs[marker][0], v) * ds(marker)
 
-    def add_dirichlet_bc(self, boundary, marker: int) -> None:
-        self._dirichlet_bcs_list.append((boundary, marker))
+            self._applied_neumann_bcs[0].append(facet_info[3])
+            self._applied_neumann_bcs[1].append(L)
 
-    def add_neumann_bc(self, boundary, marker: int) -> None:
-        self._neumann_bcs_list.append((boundary, marker))
+    def apply_neumann_bcs(self, L, V=None):
+        if V is None:
+            V = self.V
+
+        try:
+            index = self._applied_neumann_bcs[0].index(V)
+            L += self._applied_neumann_bcs[1][index]
+        except ValueError:
+            logger.warning("No Neumann BCs applied to this function space.")
+
+        return L
+
+    def add_dirichlet_bc(self, boundary, marker: int, V=None) -> None:
+        if V is None:
+            V = self.V
+
+        self._dirichlet_bcs_list.append((boundary, marker, V))
+
+    def add_neumann_bc(self, boundary, marker: int, V=None) -> None:
+        if V is None:
+            V = self.V
+
+        self._neumann_bcs_list.append((boundary, marker, V))
 
     def update_dirichlet_bc(self, values, marker: int) -> None:
-        dirichlet = self.dirichlet_bcs[marker]
+        dirichlet = self._dirichlet_bcs[marker]
         dirichlet[0].x.array[dirichlet[1]] = values
 
     def update_neumann_bc(self, values, marker: int) -> None:
-        neumann = self.neumann_bcs[marker]
+        neumann = self._neumann_bcs[marker]
         neumann[0].x.array[neumann[1]] = values
 
     def check_export_results(self) -> bool:
@@ -297,6 +358,10 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self.u_pred = Function(self.V)
         self.v_pred = Function(self.V)
 
+    def _define_differential_equations(self):
+        self.a = inner(self.sigma(self.u), self.epsilon(self.v)) * dx
+        self.L = self.apply_neumann_bcs(inner(self.f, self.v) * dx)
+
     def _update_prev_values(self) -> None:
         self.u_prev.x.array[:] = self.u_k.x.array[:]
         self.v_prev.x.array[:] = self.v_k.x.array[:]
@@ -317,14 +382,14 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
         # Solve for acceleration (using u_pred as initial guess)
         self.u_k.x.array[:] = self.u_pred.x.array[:]  # Set initial guess for the solver
-        problem = LinearProblem(self.a, self.L, bcs=self.current_dirichlet_bcs, u=self.u_k)
+        problem = LinearProblem(self.a, self.L, bcs=self.get_dirichlet_bcs(self.V), u=self.u_k)
         self.u_k = problem.solve()
 
         # Corrector step
         self.a_k.x.array[:] = (1 / (self.beta * self.dt**2)) * (self.u_k.x.array[:] - self.u_pred.x.array[:]) - ((1 - 2 * self.beta) / (2 * self.beta)) * self.a_prev.x.array[:]
         self.v_k.x.array[:] = self.v_pred.x.array[:] + self.dt * self.gamma * self.a_k.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
 
-    def calculate_forces(self, nodes) -> np.array:
+    def calculate_internal_forces(self, nodes) -> np.array:
         # Project the stress to the function space W
         sigma_expr = self.sigma(self.u_k)
 

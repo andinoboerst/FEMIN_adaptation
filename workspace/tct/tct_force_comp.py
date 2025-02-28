@@ -18,6 +18,8 @@ class TCTForceApplyFixed(get_TCT_class(DEFORMATION)):
         return 25.0
 
     def _setup(self) -> None:
+        super()._setup()
+
         self.neumann_interface_marker = 88
 
         self.add_neumann_bc(self.interface_boundary, self.neumann_interface_marker)
