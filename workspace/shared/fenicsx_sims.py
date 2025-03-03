@@ -27,7 +27,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         return {}
 
     @property
-    def plot_variables(self) -> list:
+    def plot_variables_options(self) -> list:
         try:
             return self.plot_results.keys()
         except AttributeError:
@@ -35,7 +35,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             return []
 
     # @abc.abstractmethod
-    def _setup(self) -> None:
+    def _preprocess(self) -> None:
         pass
 
     @abc.abstractmethod
@@ -80,7 +80,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         self._init_variables()
 
-        self._setup()
+        self._preprocess()
 
         self._setup_bcs()
 
@@ -241,21 +241,17 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     def format_results(self) -> None:
         self.formatted_plot_results = {key: format_vectors_from_flat(res, n_dim=self.dim) for key, res in self.plot_results.items()}
 
-    def postprocess(self, scalars: str = None, vectors: str = None, scalar_process: str = None, name: str = "result") -> None:
+    def postprocess(self, scalars: str = None, vectors: str = None, scalar_process: str = None, name: str = "result", mesh=None) -> None:
+        if mesh is None:
+            mesh = self.mesh
+
         variables = {}
         variable_names = []
         if scalars is not None:
             if isinstance(scalars, str):
-                # split_string = scalars.split("_")
-                # if len(split_string) == 2:
-                #     scalar_variable, scalar_process = split_string
-                # else:
-                #     scalar_variable = split_string[0]
-                #     scalar_process = None
                 scalar_variable = scalars
                 variable_names.append(scalar_variable)
             else:
-                # scalar_process = None
                 scalar_variable = "scalar_variable"
                 variables[scalar_variable] = scalars
         else:
@@ -296,7 +292,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         elif scalar_process == "norm":
             scalar_value = np.linalg.norm(variables[scalar_variable], axis=-1)
 
-        plot_mesh = vtk_mesh(self.mesh)
+        plot_mesh = vtk_mesh(mesh)
         create_mesh_animation(plot_mesh, scalar_value, variables.get(vector_variable), name=name)
 
 

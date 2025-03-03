@@ -46,8 +46,8 @@ class _TCTSimulation(FenicsxSimulation):
 
         self.ny, self.mesh = self.return_mesh(self.height)
 
-    def _setup(self) -> None:
-        super()._setup()
+    def _preprocess(self) -> None:
+        super()._preprocess()
 
         self.interface_nodes = self.get_nodes(self.interface_boundary, sort=True)
         self.interface_dofs = self.get_dofs(self.interface_nodes)
@@ -55,7 +55,7 @@ class _TCTSimulation(FenicsxSimulation):
         self.bottom_boundary_marker = 1111
         self.add_dirichlet_bc(self.bottom_boundary, self.bottom_boundary_marker)
 
-    def _bottom_displacement_function(self, t):
+    def bottom_displacement_function(self, t):
         value = self.amplitude * np.sin(self.omega * t)
         return [0, value] * (self.nx + 1)
 
@@ -80,7 +80,7 @@ class _TCTSimulation(FenicsxSimulation):
         return x[1] < 24.6
 
     def solve_time_step(self) -> None:
-        self.update_dirichlet_bc(self._bottom_displacement_function(self.time), self.bottom_boundary_marker)
+        self.update_dirichlet_bc(self.bottom_displacement_function(self.time), self.bottom_boundary_marker)
 
         super().solve_time_step()
 
@@ -111,11 +111,16 @@ class _TCTSimulationTractions(_TCTSimulation):
         self.f_res = Function(self.V_t)
         self.dx_t = Measure("dx", domain=self.mesh_t)
 
-    def _setup(self) -> None:
-        super()._setup()
+    def _preprocess(self) -> None:
+        super()._preprocess()
 
+        # Full simulation
         self.add_dirichlet_bc(self.top_boundary, 2222)
 
+        self.bottom_half_nodes = self.get_nodes(self.bottom_half, sort=True)
+        self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
+
+        # Traction extraction
         self.interface_nodes_t = self.get_nodes(self.interface_boundary, sort=True, V=self.V_t)
         self.interface_dofs_t = self.get_dofs(self.interface_nodes_t)
 
@@ -162,7 +167,7 @@ class _TCTSimulationTractions(_TCTSimulation):
         return self.f_res.x.array[self.interface_dofs_t].copy()
 
     def solve_time_step(self) -> None:
-        self.update_dirichlet_bc(self._bottom_displacement_function(self.time), self.bottom_boundary_marker_t)
+        self.update_dirichlet_bc(self.bottom_displacement_function(self.time), self.bottom_boundary_marker_t)
 
         super().solve_time_step()
 

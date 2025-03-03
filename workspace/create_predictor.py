@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 import os
 
-from tct.tct_force import TCTForceExtract as extractor, TCTForceApply as applicator
+from tct.tct_tractions import TCTExtractTractions as extractor, TCTApplyTractions as applicator
 from predictors.gradient_boosting import GradientBoosting
 from predictors.lstm_network import LSTMNetwork, LSTMWindowNetwork
 

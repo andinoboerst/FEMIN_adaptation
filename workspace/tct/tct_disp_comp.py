@@ -1,13 +1,13 @@
 import numpy as np
 
-from tct.tct_disp import TCTDispExtract
-from shared.tct import get_TCT_class
+from tct.tct_disp import TCTExtractDisp
+from shared.tct import get_TCT_class_tractions
 
 
 DEFORMATION = "elastic"  # or plastic
 
 
-class TCTDispApplyFixed(get_TCT_class(DEFORMATION)):
+class TCTApplyFixedDisp(get_TCT_class_tractions(DEFORMATION)):
 
     def __init__(self, disps, frequency: int = 1000) -> None:
         self.disps = disps
@@ -17,7 +17,9 @@ class TCTDispApplyFixed(get_TCT_class(DEFORMATION)):
     def height(self) -> float:
         return 25.0
 
-    def _setup(self) -> None:
+    def _preprocess(self) -> None:
+        super()._preprocess()
+
         self.interface_marker = 88
         self.add_dirichlet_bc(self.interface_boundary, self.interface_marker)
 
@@ -28,11 +30,11 @@ class TCTDispApplyFixed(get_TCT_class(DEFORMATION)):
 
 
 def compare_disp_application() -> None:
-    tct_extract = TCTDispExtract()
+    tct_extract = TCTExtractDisp()
     tct_extract.run()
     tct_extract.postprocess("u", "u", "y", "disps_gen")
 
-    tct_apply = TCTDispApplyFixed(tct_extract.data_out)
+    tct_apply = TCTApplyFixedDisp(tct_extract.data_out)
     tct_apply.run()
 
     tct_apply.postprocess("u", "u", "y", "disps_app")
