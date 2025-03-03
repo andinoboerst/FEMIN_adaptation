@@ -14,7 +14,7 @@ logger = logging.getLogger("GradientBoosting")
 class GradientBoosting(FenicsxPredictor):
 
     def __init__(self, X: np.ndarray, Y: np) -> None:
-        super().__init__(X.reshape(-1, self.X.shape[-1]), Y.reshape(-1, self.Y.shape[-1]))
+        super().__init__(X.reshape(-1, X.shape[-1]), Y.reshape(-1, Y.shape[-1]))
 
         self.params = {
             "n_estimators": 500,

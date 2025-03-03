@@ -2,16 +2,16 @@ import numpy as np
 import pickle
 import os
 
-from tct.tct_tractions import TCTExtractTractions as extractor, TCTApplyTractions as applicator
+from tct.tct_disp import TCTExtractDisp as extractor, TCTApplyDisp as applicator
 from predictors.gradient_boosting import GradientBoosting
-from predictors.lstm_network import LSTMNetwork, LSTMWindowNetwork
+from predictors.lstm_network import LSTMNetwork  # , LSTMWindowNetwork
 
 
 DATA_FOLDER = "results"
 
 
 def generate_training_set(version: int = 1):
-    frequency_range = range(500, 2001, int(1500 / 15))
+    frequency_range = range(500, 2001, int(1500 / 5))
 
     training_in = []
     training_out = []
@@ -103,9 +103,9 @@ def run(version: int, frequency: int = 1000, predictor_method: str = "lstm", sim
 
 
 if __name__ == "__main__":
-    version = 9
+    version = 10
     frequency = 1000
-    predictor_method = "lstm"
+    predictor_method = "gradient_boosting"
     simulate_only = False
     training_set_exists = True
 
@@ -113,7 +113,5 @@ if __name__ == "__main__":
         os.mkdir(DATA_FOLDER)
     except FileExistsError:
         print("Folder already exists.")
-
-    # train_predictor(version)
 
     run(version, frequency, predictor_method, simulate_only, training_set_exists)
