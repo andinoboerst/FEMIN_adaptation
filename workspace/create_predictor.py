@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 import os
 
-from tct.tct_disp import TCTExtractDisp as extractor, TCTApplyDisp as applicator
+from tct.tct_tractions import TCTExtractTractions as extractor, TCTApplyTractions as applicator
 from predictors.gradient_boosting import GradientBoosting
 from predictors.lstm_network import LSTMNetwork  # , LSTMWindowNetwork
 
@@ -11,7 +11,7 @@ DATA_FOLDER = "results"
 
 
 def generate_training_set(version: int = 1):
-    frequency_range = range(500, 2001, int(1500 / 5))
+    frequency_range = range(500, 2001, int(1500 / 15))
 
     training_in = []
     training_out = []
@@ -105,9 +105,9 @@ def run(version: int, frequency: int = 1000, predictor_method: str = "lstm", sim
 if __name__ == "__main__":
     version = 10
     frequency = 1000
-    predictor_method = "gradient_boosting"
+    predictor_method = "lstm"
     simulate_only = False
-    training_set_exists = True
+    training_set_exists = False
 
     try:
         os.mkdir(DATA_FOLDER)

@@ -86,9 +86,7 @@ class LSTMNetwork(FenicsxPredictor):
         # Initialize model, loss, and optimizer
         self._model = LSTMModel(input_dim=42, hidden_dim=100, layer_dim=1, output_dim=42)
         criterion = nn.MSELoss()
-        # criterion = nn.CrossEntropyLoss()
-        # optimizer = torch.optim.Adam(self._model.parameters(), lr=0.01)
-        optimizer = torch.optim.SGD(self._model.parameters(), lr=0.01)
+        optimizer = torch.optim.Adam(self._model.parameters(), lr=0.01)
 
         # Training loop
         num_epochs = 1000
