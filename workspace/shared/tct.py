@@ -50,7 +50,7 @@ class _TCTSimulation(FenicsxSimulation):
 
         self.add_dirichlet_bc(self.top_boundary, 2222)
 
-        self.interface_nodes = self.get_nodes(self.interface_boundary, sort=True)
+        self.interface_nodes = self.get_nodes(self.interface_boundary)
         self.interface_dofs = self.get_dofs(self.interface_nodes)
 
         self.bottom_nodes = self.get_nodes(self.bottom_boundary)
@@ -128,16 +128,16 @@ class _TCTSimulationTractions(_TCTSimulation):
         # Full simulation
         self.add_dirichlet_bc(self.top_boundary, 2222)
 
-        self.bottom_half_nodes = self.get_nodes(self.bottom_half, sort=True)
+        self.bottom_half_nodes = self.get_nodes(self.bottom_half)
         self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
 
         # Traction extraction
-        self.interface_nodes_t = self.get_nodes(self.interface_boundary, sort=True, V=self.V_t)
+        self.interface_nodes_t = self.get_nodes(self.interface_boundary, V=self.V_t)
         self.interface_dofs_t = self.get_dofs(self.interface_nodes_t)
 
-        self.not_interface_nodes_t = self.get_nodes(self.not_interface_boundary, sort=True, V=self.V_t)
+        self.not_interface_nodes_t = self.get_nodes(self.not_interface_boundary, V=self.V_t)
 
-        self.bottom_half_nodes_t = self.get_nodes(self.bottom_half, sort=True, V=self.V_t)
+        self.bottom_half_nodes_t = self.get_nodes(self.bottom_half, V=self.V_t)
         self.bottom_half_dofs_t = self.get_dofs(self.bottom_half_nodes_t)
 
         self.interface_marker_t = 88
@@ -209,20 +209,21 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
         # Full simulation
         # self.add_dirichlet_bc(self.top_boundary, 2222)
 
-        self.bottom_half_nodes = self.get_nodes(self.bottom_half, sort=True)
+        self.bottom_half_nodes = self.get_nodes(self.bottom_half)
         self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
 
         # Traction extraction
-        self.interface_nodes_t = self.get_nodes(self.interface_boundary, sort=True, V=self.V_t)
+        self.interface_nodes_t = self.get_nodes(self.interface_boundary, V=self.V_t)
         self.interface_dofs_t = self.get_dofs(self.interface_nodes_t)
 
         self.bottom_boundary_marker_t = 5555
         self.add_dirichlet_bc(self.bottom_boundary, self.bottom_boundary_marker_t, self.V_t)
 
-        self.not_interface_nodes_t = self.get_nodes(self.not_interface_boundary, sort=True, V=self.V_t)
+        self.not_interface_nodes_t = self.get_nodes(self.not_interface_boundary, V=self.V_t)
 
-        self.bottom_half_nodes_t = self.get_nodes(self.bottom_half, sort=True, V=self.V_t)
-        self.bottom_half_dofs_t = self.get_dofs(self.bottom_half_nodes_t)
+        self.bottom_half_nodes_t = self.get_nodes(self.bottom_half, V=self.V_t)
+        self.bottom_half_dofs_sigma_t = self.get_dofs(self.bottom_half_nodes_t, value_dim=2)
+        self.bottom_half_dofs_sigma = self.get_dofs(self.bottom_half_nodes, value_dim=2)
 
         self.interface_marker_t = 88
         self.not_interface_marker_t = 99
@@ -260,7 +261,7 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
         # solver = NewtonSolver(MPI.COMM_WORLD, problem)
         # solver.solve(self.u_k)
 
-        self.sigma_new_t.x.array[self.bottom_half_dofs_t] = self.sigma_new.x.array[self.bottom_half_dofs].copy()
+        self.sigma_new_t.x.array[self.bottom_half_dofs_sigma_t] = self.sigma_new.x.array[self.bottom_half_dofs_sigma].copy()
 
         problem = LinearProblem(self.a_t, self.L_t, bcs=self.get_dirichlet_bcs(self.V_t), u=self.f_res)
         self.f_res = problem.solve()

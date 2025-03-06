@@ -99,13 +99,12 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         return locate_dofs_geometrical(V, marker)
 
-    def get_dofs(self, nodes) -> np.array:
-        dofs = np.zeros(len(nodes) * self.dim, dtype=int)
+    def get_dofs(self, nodes, value_dim: int = 1) -> np.array:
+        dofs = np.zeros(len(nodes) * self.dim * value_dim, dtype=int)
         for i, node in enumerate(nodes):
-            node_dofs = [node * self.dim, node * self.dim + 1]
-            if self.dim == 3:
-                node_dofs.append(node * self.dim + 2)
-            dofs[self.dim * i:self.dim * i + self.dim] = node_dofs
+            start = node * self.dim * value_dim
+            node_dofs = range(start, start + (self.dim * value_dim))
+            dofs[self.dim * value_dim * i:self.dim * value_dim * i + (self.dim * value_dim)] = node_dofs
 
         return dofs
 
