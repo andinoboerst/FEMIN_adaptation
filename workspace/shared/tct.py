@@ -8,7 +8,6 @@ from dolfinx.fem import Function, Constant, functionspace, dirichletbc, locate_d
 from dolfinx.fem.petsc import LinearProblem
 
 from shared.fenicsx_sims import FenicsxSimulation, StructuralElasticSimulation, StructuralPlasticSimulation
-from shared.progress_bar import progressbar
 
 
 class _TCTSimulation(FenicsxSimulation):

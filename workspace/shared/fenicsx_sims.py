@@ -4,7 +4,7 @@ import logging
 # import dill
 
 from mpi4py import MPI
-from dolfinx.fem import form, Constant, Expression, Function, functionspace, dirichletbc, locate_dofs_geometrical, locate_dofs_topological
+from dolfinx.fem import form, Constant, Expression, Function, functionspace, dirichletbc, locate_dofs_geometrical
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem, NonlinearProblem, assemble_matrix, assemble_vector
@@ -95,14 +95,13 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         if V is None:
             V = self.V
 
-        # mesh = V.mesh
-
         nodes = locate_dofs_geometrical(V, marker)
 
-        # if sort:
-        #     node_coords = np.array([tuple(mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
-        #     nodes_sorted_indices = np.argsort(node_coords, order=['x', 'y', 'z'])
-        #     nodes = nodes[nodes_sorted_indices]
+        if sort:
+            mesh = V.mesh
+            node_coords = np.array([tuple(mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
+            nodes_sorted_indices = np.argsort(node_coords, order=['x', 'y', 'z'])
+            nodes = nodes[nodes_sorted_indices]
 
         return nodes
 
