@@ -20,6 +20,8 @@ class TCTApplyFixedTractions(get_TCT_class(DEFORMATION)):
     def _preprocess(self) -> None:
         super()._preprocess()
 
+        self.bottom_half_nodes = self.get_nodes(self.bottom_half)
+
         self.neumann_interface_marker = 88
 
         self.add_neumann_bc(self.interface_boundary, self.neumann_interface_marker)
