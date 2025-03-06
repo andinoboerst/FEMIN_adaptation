@@ -4,7 +4,7 @@ import logging
 # import dill
 
 from mpi4py import MPI
-from dolfinx.fem import form, Constant, Expression, Function, functionspace, dirichletbc, locate_dofs_geometrical
+from dolfinx.fem import form, Constant, Expression, Function, functionspace, dirichletbc, locate_dofs_geometrical, locate_dofs_topological
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem, NonlinearProblem, assemble_matrix, assemble_vector
@@ -22,6 +22,8 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     # Time Stepping
     time_total = 3e-3
     dt = 5e-7
+
+    element_type = "CG"
 
     def __init__(self) -> None:
         pass
@@ -91,19 +93,11 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         self.plot_results = {key: [] for key in self._plot_variables().keys()}
 
-    def get_nodes(self, marker, sort: bool = False, V=None) -> np.array:
+    def get_nodes(self, marker, V=None) -> np.array:
         if V is None:
             V = self.V
 
-        nodes = locate_dofs_geometrical(V, marker)
-
-        if sort:
-            mesh = V.mesh
-            node_coords = np.array([tuple(mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
-            nodes_sorted_indices = np.argsort(node_coords, order=['x', 'y', 'z'])
-            nodes = nodes[nodes_sorted_indices]
-
-        return nodes
+        return locate_dofs_geometrical(V, marker)
 
     def get_dofs(self, nodes) -> np.array:
         dofs = np.zeros(len(nodes) * self.dim, dtype=int)
@@ -125,7 +119,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         self._dirichlet_bcs = {}
 
         for boundary, marker, V in self._dirichlet_bcs_list:
-            nodes = locate_dofs_geometrical(V, boundary)
+            nodes = self.get_nodes(boundary, V=V)
             dofs = self.get_dofs(nodes)
             func = Function(V)
             self._dirichlet_bcs[marker] = (func, dofs)
@@ -327,7 +321,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
         super().setup()
 
     def _define_functionspace(self) -> None:
-        self.V = functionspace(self.mesh, ("CG", 1, (2,)))
+        self.V = functionspace(self.mesh, (self.element_type, 1, (2,)))
         self.W = functionspace(self.mesh, ("DG", 0, (2, 2)))
 
     def _init_variables(self) -> None:
