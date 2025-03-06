@@ -3,11 +3,14 @@ import numpy as np
 import logging
 # import dill
 
-from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
+from mpi4py import MPI
+from dolfinx.fem import form, Constant, Expression, Function, functionspace, dirichletbc, locate_dofs_geometrical, locate_dofs_topological
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
-from dolfinx.fem.petsc import LinearProblem
-from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx
+from dolfinx.fem.petsc import LinearProblem, NonlinearProblem, assemble_matrix, assemble_vector
+from dolfinx.nls.petsc import NewtonSolver
+from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx, sqrt, conditional, sym, derivative
+from petsc4py import PETSc
 
 from shared.plotting import format_vectors_from_flat, create_mesh_animation
 from shared.progress_bar import progressbar
@@ -92,14 +95,14 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         if V is None:
             V = self.V
 
-        mesh = V.mesh
+        # mesh = V.mesh
 
         nodes = locate_dofs_geometrical(V, marker)
 
-        if sort:
-            node_coords = np.array([tuple(mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
-            nodes_sorted_indices = np.argsort(node_coords, order=['x', 'y', 'z'])
-            nodes = nodes[nodes_sorted_indices]
+        # if sort:
+        #     node_coords = np.array([tuple(mesh.geometry.x[node]) for node in nodes], dtype=[('x', float), ('y', float), ('z', float)])
+        #     nodes_sorted_indices = np.argsort(node_coords, order=['x', 'y', 'z'])
+        #     nodes = nodes[nodes_sorted_indices]
 
         return nodes
 
@@ -326,7 +329,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
     def _define_functionspace(self) -> None:
         self.V = functionspace(self.mesh, ("CG", 1, (2,)))
-        self.W = functionspace(self.mesh, ("CG", 1, (2, 2)))
+        self.W = functionspace(self.mesh, ("DG", 0, (2, 2)))
 
     def _init_variables(self) -> None:
         self.u = TrialFunction(self.V)
@@ -365,10 +368,11 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
     @staticmethod
     def epsilon(u):
-        return 0.5 * (grad(u) + grad(u).T)
+        return sym(grad(u))
 
     def sigma(self, u):
-        return self.lmbda * tr(self.epsilon(u)) * Identity(self.dim) + 2 * self.mu * self.epsilon(u)
+        epsilon = self.epsilon(u)
+        return self.lmbda * tr(epsilon) * Identity(self.dim) + 2 * self.mu * epsilon
 
     def solve_u(self) -> None:
         # Solve using Newmark-beta
@@ -418,5 +422,153 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
 
 class StructuralPlasticSimulation(StructuralElasticSimulation):
-    def __init__(self):
-        super().__init__()
+    sigma_Y = 250e15  # Yield stress (MPa)
+    C_k = 1  # Kinematic hardening modulus
+
+    def sigma_dev(self, sigma):
+        return sigma - (1 / 3) * tr(sigma) * Identity(2)
+
+    def _init_variables(self):
+        super()._init_variables()
+
+        self.DG0 = functionspace(self.mesh, ("DG", 0))
+
+        # self.sigma_old = Function(self.W)
+        self.alpha_old = Function(self.W)
+        self.eps_p_old = Function(self.W)
+
+        self.sigma_correction_func = Function(self.W)
+
+        self.f_trial_func = Function(self.DG0)
+        self.delta_lambda_func = Function(self.DG0)
+        self.sigma_trial_func = Function(self.W)
+        self.s_trial_func = Function(self.W)
+
+    def _define_differential_equations(self):
+        # super()._define_differential_equations()
+
+        # Define elastic trial stress
+        self.sigma_trial = self.sigma(self.u_k)
+        self.s_trial = self.sigma_dev(self.sigma_trial)
+
+        # Compute yield function
+        self.f_trial = sqrt(inner(self.s_trial - self.alpha_old, self.s_trial - self.alpha_old)) - self.sigma_Y
+
+        # Return mapping (Plastic correction)
+        self.delta_lambda = conditional(self.f_trial > 0, self.f_trial / (2 * self.mu + self.C_k), 0)
+
+        norm_s = sqrt(inner(self.s_trial - self.alpha_old, self.s_trial - self.alpha_old))
+        self.eps_p_correction = self.delta_lambda * (self.s_trial - self.alpha_old) / conditional(norm_s > 1e-8, norm_s, 1e-8)
+        self.eps_p_new = self.eps_p_old + self.eps_p_correction
+
+        self.alpha_correction = self.C_k * (self.eps_p_new - self.eps_p_old)
+        self.alpha_new = self.alpha_old + self.alpha_correction
+
+        # Compute updated stress
+        self.sigma_correction = - 2 * self.mu * (self.eps_p_new - self.eps_p_old)
+        self.sigma_new = self.sigma(self.u_k) + self.sigma_correction
+
+        # Define variational problem
+        # self.residual = self.apply_neumann_bcs(inner(self.f, self.v) * dx - inner(self.sigma_new, self.epsilon(self.v)) * dx)
+        self.residual = inner(self.sigma(self.u_k), self.epsilon(self.v)) * dx
+
+        # Define interpolations
+        self.eps_p_expr = Expression(self.eps_p_new, self.W.element.interpolation_points())
+        self.alpha_expr = Expression(self.alpha_new, self.W.element.interpolation_points())
+
+        self.f_trial_expr = Expression(self.f_trial, self.DG0.element.interpolation_points())
+        self.delta_lambda_expr = Expression(self.delta_lambda, self.DG0.element.interpolation_points())
+        self.sigma_trial_expr = Expression(self.sigma_trial, self.W.element.interpolation_points())
+        self.s_trial_expr = Expression(self.s_trial, self.W.element.interpolation_points())
+
+        self.sigma_correction_expr = Expression(self.sigma_correction, self.sigma_correction_func.function_space.element.interpolation_points())
+
+    def _update_prev_values(self) -> None:
+        super()._update_prev_values()
+
+        # Update values
+        self.eps_p_old.interpolate(self.eps_p_expr)
+        self.alpha_old.interpolate(self.alpha_expr)
+
+    def bottom_displacement_function_new(self, t):
+        return self.amplitude * np.sin(self.omega * t)
+
+    def solve_u(self) -> None:
+
+        self.sigma_correction_func.interpolate(self.sigma_correction_expr)
+        self.f_trial_func.interpolate(self.f_trial_expr)
+        self.delta_lambda_func.interpolate(self.delta_lambda_expr)
+        self.sigma_trial_func.interpolate(self.sigma_trial_expr)
+        self.s_trial_func.interpolate(self.s_trial_expr)
+        # print("sigma_trial values: ", np.linalg.norm(self.sigma_trial_func.x.array))
+        # print("s_trial values: ", np.linalg.norm(self.s_trial_func.x.array))
+        # print("f_trial values: ", np.linalg.norm(self.f_trial_func.x.array))
+        # print("delta_lambda values: ", np.linalg.norm(self.delta_lambda_func.x.array))
+        # print("sigma correction values: ", np.linalg.norm(self.sigma_correction_func.x.array))
+
+        # Solve using Newmark-beta
+        # Predictor step
+        self.u_pred.x.array[:] = self.u_prev.x.array[:] + self.dt * self.v_prev.x.array[:] + 0.5 * self.dt**2 * (1 - 2 * self.beta) * self.a_prev.x.array[:]
+        self.v_pred.x.array[:] = self.v_prev.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
+
+        # Solve for acceleration (using u_pred as initial guess)
+        # self.u_k.x.array[:] = self.u_pred.x.array[:]  # Set initial guess for the solver
+
+        # J = derivative(self.residual, self.u_k)
+
+        # A = assemble_matrix(form(J), self.get_dirichlet_bcs())
+        # A.assemble()
+
+        # row_idx = 10  # Example row index
+        # row_values = A.getRow(row_idx)
+        # print(f"Row {row_idx} values: {row_values}")
+
+        # ksp = PETSc.KSP().create(A.getComm())
+        # ksp.setOperators(A)
+        # ksp.setType("gmres")  # Use GMRES to analyze conditioning
+
+        # # Compute and print condition number
+        # A_norm = A.norm()
+        # A_inv_norm = 1 / A_norm if A_norm > 1e-12 else np.inf  # Avoid division by zero
+        # condition_number = A_norm * A_inv_norm
+        # print(f"Condition number of Jacobian: {condition_number}")
+
+        R_norm = np.linalg.norm(assemble_vector(form(self.residual)).array)
+        print(f"Residual norm at iteration {self.step}: {R_norm}")
+
+        # quit()
+
+        problem = NonlinearProblem(self.residual, self.u_k, bcs=self.get_dirichlet_bcs())
+        solver = NewtonSolver(MPI.COMM_WORLD, problem)
+
+        solver.max_it = 10000  # Increase max iterations
+        # solver.relaxation_parameter = 1.0  # Can reduce to 0.8 if needed
+        # solver.damping = 1.0  # Reduce the step size to stabilize convergence
+        # solver.ls = "bt"  # Use backtracking line search
+        # solver.krylov_solver.setType("gmres")
+        # solver.krylov_solver.getPC().setType("ilu")  # Algebraic multigrid
+        # solver.convergence_criterion = "residual"
+        # solver.krylov_solver = "gmres"  # More robust for nonlinear problems
+        # solver.preconditioner = "ilu"   # Incomplete LU factorization for stability
+        # solver.atol = 1e-6  # Absolute tolerance (adjust based on problem size)
+        # solver.rtol = 1e-6  # Relative tolerance
+        # ksp = solver.krylov_solver
+        # opts = PETSc.Options()
+        # option_prefix = ksp.getOptionsPrefix()
+        # opts[f"{option_prefix}ksp_type"] = "gmres"
+        # # opts[f"{option_prefix}pc_type"] = "gamg"
+        # # opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
+        # ksp.setFromOptions()
+
+        n, converged = solver.solve(self.u_k)
+
+        print(f"Solver converged ({converged}) in {n} iterations")
+
+        print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array)}")
+
+        # Corrector step
+        self.a_k.x.array[:] = (1 / (self.beta * self.dt**2)) * (self.u_k.x.array[:] - self.u_pred.x.array[:]) - ((1 - 2 * self.beta) / (2 * self.beta)) * self.a_prev.x.array[:]
+        self.v_k.x.array[:] = self.v_pred.x.array[:] + self.dt * self.gamma * self.a_k.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
+
+    def check_export_results(self) -> bool:
+        return self.step % 1 == 0

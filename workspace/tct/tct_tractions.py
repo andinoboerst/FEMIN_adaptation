@@ -7,7 +7,7 @@ from shared.tct import get_TCT_class, get_TCT_class_tractions
 DEFORMATION = "elastic"  # or plastic
 
 
-class TCTExtractTractions(get_TCT_class_tractions("elastic")):
+class TCTExtractTractions(get_TCT_class_tractions(DEFORMATION)):
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -42,15 +42,18 @@ class TCTApplyTractions(get_TCT_class(DEFORMATION)):
 
     def _solve_time_step(self) -> None:
 
-        self.update_neumann_bc(self.predictor.predict(self.u_k.x.array[self.interface_dofs]), self.neumann_interface_marker)
+        prediction = self.predictor.predict(self.u_k.x.array[self.interface_dofs])
+
+        self.update_neumann_bc(prediction, self.neumann_interface_marker)
 
         self.solve_u()
 
 
 if __name__ == "__main__":
     tct = TCTExtractTractions()
+    # tct.time_total = 5e-5
     tct.run()
-    tct.postprocess("u_y", "u", "test5")
+    tct.postprocess("u", "u", "y", "test5")
 
     # with open("results/model_v07.pkl", "rb") as f:
     #     predictor = pickle.load(f)

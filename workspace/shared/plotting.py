@@ -88,7 +88,7 @@ def create_mesh_animation(mesh, scalars=None, vectors=None, name: str = "result"
             grid,
             **grid_props
         )
-        text.SetText(0, f"{i}/{time_steps}")
+        text.SetText(0, f"{i + 1}/{time_steps}")
         plotter.write_frame()
 
     plotter.close()

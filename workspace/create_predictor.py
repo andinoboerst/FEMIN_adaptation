@@ -11,7 +11,7 @@ DATA_FOLDER = "results"
 
 
 def generate_training_set(version: int = 1):
-    frequency_range = range(500, 2001, int(1500 / 15))
+    frequency_range = range(500, 2001, int(1500 / 20))
 
     training_in = []
     training_out = []
@@ -93,8 +93,8 @@ PREDICTOR_FUNCTIONS = {
 }
 
 
-def run(version: int, frequency: int = 1000, predictor_method: str = "lstm", simulate_only: bool = False, training_set_exists: bool = False) -> None:
-    if not simulate_only:
+def run(version: int, frequency: int = 1000, predictor_method: str = "lstm", training_set_exists: bool = False, predictor_model_exists: bool = False) -> None:
+    if not predictor_model_exists:
         if not training_set_exists:
             generate_training_set(version)
         PREDICTOR_FUNCTIONS[predictor_method][0](version)
@@ -106,12 +106,12 @@ if __name__ == "__main__":
     version = 10
     frequency = 1000
     predictor_method = "lstm"
-    simulate_only = False
-    training_set_exists = False
+    training_set_exists = True
+    predictor_model_exits = False
 
     try:
         os.mkdir(DATA_FOLDER)
     except FileExistsError:
         print("Folder already exists.")
 
-    run(version, frequency, predictor_method, simulate_only, training_set_exists)
+    run(version, frequency, predictor_method, training_set_exists, predictor_model_exits)

@@ -26,7 +26,7 @@ class FenicsxPredictor(metaclass=abc.ABCMeta):
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         return self._model.predict([x])[0]
-    
+
     def save(self, path: str) -> None:
         with open(path, "wb") as f:
             pickle.dump(self, f)
