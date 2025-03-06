@@ -2,7 +2,7 @@ import numpy as np
 
 from tct.tct_disp import TCTExtractDisp
 from shared.tct import get_TCT_class_tractions
-from shared.plotting import format_vectors_from_flat
+# from shared.plotting import format_vectors_from_flat
 
 
 DEFORMATION = "elastic"  # or plastic
@@ -38,18 +38,22 @@ def compare_disp_application() -> None:
     tct_extract = TCTExtractDisp()
     tct_extract.run()
 
+    tct_extract.postprocess("u", "u", "y", "disps_full")
+
     tct_apply = TCTApplyFixedDisp(tct_extract.data_out)
     tct_apply.run()
 
-    forces_real = tct_extract.data_in
-    forces_pred = tct_apply.prediction_input
+    tct_apply.postprocess("u", "u", "y", "disps_applied")
 
-    prediction_error = np.zeros((tct_extract.num_steps, len(tct_extract.u_k.x.array)))
-    prediction_error[:, tct_extract.interface_dofs] = np.nan_to_num((forces_real - forces_pred) / forces_real.max(), nan=0.0)
-    formatted_prediction_error = format_vectors_from_flat(prediction_error)
-    formatted_prediction_error = formatted_prediction_error[::100]
+    # forces_real = tct_extract.data_in
+    # forces_pred = tct_apply.prediction_input
 
-    tct_extract.postprocess(formatted_prediction_error, "u", "norm", "disps_tractions_error")
+    # prediction_error = np.zeros((tct_extract.num_steps, len(tct_extract.u_k.x.array)))
+    # prediction_error[:, tct_extract.interface_dofs] = np.nan_to_num((forces_real - forces_pred) / forces_real.max(), nan=0.0)
+    # formatted_prediction_error = format_vectors_from_flat(prediction_error)
+    # formatted_prediction_error = formatted_prediction_error[::100]
+
+    # tct_extract.postprocess(formatted_prediction_error, "u", "norm", "disps_tractions_error")
 
     error = np.zeros(tct_extract.formatted_plot_results["u"].shape)
     error[:, tct_extract.bottom_half_nodes] = tct_extract.formatted_plot_results["u"][:, tct_extract.bottom_half_nodes] - tct_apply.formatted_plot_results["u"][:, tct_apply.bottom_half_nodes]
