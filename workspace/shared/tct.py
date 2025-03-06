@@ -82,6 +82,14 @@ class _TCTSimulation(FenicsxSimulation):
     def not_interface_boundary(x):
         return x[1] < 24.6
 
+    # @staticmethod
+    # def bottom_half(x):
+    #     return x[1] <= 25 * np.isclose(x[1], 25)
+
+    # @staticmethod
+    # def not_interface_boundary(x):
+    #     return x[1] < 25 * ~np.isclose(x[1], 25)
+
     def solve_time_step(self) -> None:
         self.update_dirichlet_bc(self.bottom_displacement_function(self.time), self.bottom_boundary_marker)
 
@@ -102,7 +110,7 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _define_functionspace(self):
         super()._define_functionspace()
 
-        self.V_t = functionspace(self.mesh_t, ("CG", 1, (2,)))
+        self.V_t = functionspace(self.mesh_t, (self.element_type, 1, (2,)))
 
     def _init_variables(self):
         super()._init_variables()
@@ -126,9 +134,6 @@ class _TCTSimulationTractions(_TCTSimulation):
         # Traction extraction
         self.interface_nodes_t = self.get_nodes(self.interface_boundary, sort=True, V=self.V_t)
         self.interface_dofs_t = self.get_dofs(self.interface_nodes_t)
-
-        self.bottom_boundary_marker_t = 5555
-        self.add_dirichlet_bc(self.bottom_boundary, self.bottom_boundary_marker_t, self.V_t)
 
         self.not_interface_nodes_t = self.get_nodes(self.not_interface_boundary, sort=True, V=self.V_t)
 
@@ -168,11 +173,6 @@ class _TCTSimulationTractions(_TCTSimulation):
         self.f_res = problem.solve()
 
         return self.f_res.x.array[self.interface_dofs_t].copy()
-
-    def solve_time_step(self) -> None:
-        self.update_dirichlet_bc(self.bottom_displacement_function(self.time), self.bottom_boundary_marker_t)
-
-        super().solve_time_step()
 
 
 class _TCTSimulationTractionsPlastic(_TCTSimulation):
