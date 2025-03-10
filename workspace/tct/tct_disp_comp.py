@@ -10,13 +10,11 @@ DEFORMATION = "elastic"  # or plastic
 
 class TCTApplyFixedDisp(get_TCT_class_tractions(DEFORMATION)):
 
+    height = 25.0
+
     def __init__(self, disps, frequency: int = 1000) -> None:
         self.disps = disps
         super().__init__(frequency)
-
-    @property
-    def height(self) -> float:
-        return 25.0
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -29,7 +27,7 @@ class TCTApplyFixedDisp(get_TCT_class_tractions(DEFORMATION)):
     def _solve_time_step(self) -> None:
         self.prediction_input[self.step, :] = self.calculate_interface_tractions()
 
-        self.update_dirichlet_bc(self.disps[self.step], self.interface_marker)
+        # self.update_dirichlet_bc(self.disps[self.step], self.interface_marker)
 
         self.solve_u()
 
@@ -39,6 +37,9 @@ def compare_disp_application() -> None:
     tct_extract.run()
 
     tct_extract.postprocess("u", "u", "y", "disps_full")
+
+    with open("data_disp.npy", "wb") as f:
+        np.save(f, tct_extract.data_out)
 
     tct_apply = TCTApplyFixedDisp(tct_extract.data_out)
     tct_apply.run()

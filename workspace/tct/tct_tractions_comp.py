@@ -9,13 +9,11 @@ DEFORMATION = "elastic"  # or plastic
 
 class TCTApplyFixedTractions(get_TCT_class(DEFORMATION)):
 
+    height = 25.0
+
     def __init__(self, tractions, frequency: int = 1000) -> None:
         self.tractions = tractions
         super().__init__(frequency)
-
-    @property
-    def height(self) -> float:
-        return 25.0
 
     def _preprocess(self) -> None:
         super()._preprocess()

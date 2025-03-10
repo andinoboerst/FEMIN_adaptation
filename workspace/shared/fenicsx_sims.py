@@ -7,7 +7,7 @@ from mpi4py import MPI
 from dolfinx.fem import form, Constant, Expression, Function, functionspace, dirichletbc, locate_dofs_geometrical, locate_dofs_topological
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
-from dolfinx.fem.petsc import LinearProblem, NonlinearProblem, assemble_matrix, assemble_vector
+from dolfinx.fem.petsc import LinearProblem, NonlinearProblem, assemble_matrix, assemble_vector, create_matrix, _create_form, create_vector, assemble_matrix_mat
 from dolfinx.nls.petsc import NewtonSolver
 from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx, sqrt, conditional, sym, derivative
 from petsc4py import PETSc
@@ -374,7 +374,15 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
         # Solve for acceleration (using u_pred as initial guess)
         self.u_k.x.array[:] = self.u_pred.x.array[:]  # Set initial guess for the solver
-        problem = LinearProblem(self.a, self.L, bcs=self.get_dirichlet_bcs(self.V), u=self.u_k)
+
+        problem = LinearProblem(self.a,
+                                self.L,
+                                bcs=self.get_dirichlet_bcs(self.V),
+                                u=self.u_k,
+                                petsc_options={"ksp_type": "preonly",
+                                               "pc_type": "lu",
+                                               "pc_factor_mat_solver_type": "mumps"}
+                                )
         self.u_k = problem.solve()
 
         # Corrector step

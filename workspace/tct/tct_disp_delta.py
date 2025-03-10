@@ -30,13 +30,11 @@ class TCTExtractDispDelta(get_TCT_class_tractions(DEFORMATION)):
 
 class TCTApplyDispDelta(get_TCT_class_tractions(DEFORMATION)):
 
+    height = 25.0
+
     def __init__(self, predictor, frequency: int = 1000) -> None:
         self.predictor = predictor
         super().__init__(frequency)
-
-    @property
-    def height(self) -> float:
-        return 25.0
 
     def _preprocess(self) -> None:
         super()._preprocess()

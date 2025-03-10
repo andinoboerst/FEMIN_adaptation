@@ -16,6 +16,7 @@ class _TCTSimulation(FenicsxSimulation):
 
     # Domain and Mesh
     width = 100.0
+    height = 50.0
     element_size_x = 5.0
     element_size_y = 5.0
 
@@ -23,10 +24,6 @@ class _TCTSimulation(FenicsxSimulation):
         super().__init__()
 
         self.omega = 2 * np.pi * frequency
-
-    @property
-    def height(self) -> float:
-        return 50.0
 
     def return_mesh(self, height: float):
         ny = int(height / self.element_size_y)
@@ -98,9 +95,7 @@ class _TCTSimulation(FenicsxSimulation):
 
 class _TCTSimulationTractions(_TCTSimulation):
 
-    @property
-    def height_t(self) -> float:
-        return 25.0
+    height_t = 25.0
 
     def _define_mesh(self) -> None:
         super()._define_mesh()
