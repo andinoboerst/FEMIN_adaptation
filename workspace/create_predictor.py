@@ -103,11 +103,11 @@ def run(version: int, frequency: int = 1000, predictor_method: str = "lstm", tra
 
 
 if __name__ == "__main__":
-    version = 10
+    version = 11
     frequency = 1000
     predictor_method = "lstm"
     training_set_exists = True
-    predictor_model_exits = False
+    predictor_model_exits = True
 
     try:
         os.mkdir(DATA_FOLDER)

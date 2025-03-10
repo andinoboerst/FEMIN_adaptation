@@ -300,6 +300,12 @@ class StructuralElasticSimulation(FenicsxSimulation):
     beta = 0.25
     gamma = 0.5
 
+    linear_petsc_options = {
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -375,14 +381,13 @@ class StructuralElasticSimulation(FenicsxSimulation):
         # Solve for acceleration (using u_pred as initial guess)
         self.u_k.x.array[:] = self.u_pred.x.array[:]  # Set initial guess for the solver
 
-        problem = LinearProblem(self.a,
-                                self.L,
-                                bcs=self.get_dirichlet_bcs(self.V),
-                                u=self.u_k,
-                                petsc_options={"ksp_type": "preonly",
-                                               "pc_type": "lu",
-                                               "pc_factor_mat_solver_type": "mumps"}
-                                )
+        problem = LinearProblem(
+            self.a,
+            self.L,
+            bcs=self.get_dirichlet_bcs(self.V),
+            u=self.u_k,
+            petsc_options=self.linear_petsc_options,
+        )
         self.u_k = problem.solve()
 
         # Corrector step
@@ -397,7 +402,12 @@ class StructuralElasticSimulation(FenicsxSimulation):
         a_proj = inner(self.tau, self.w) * dx  # Bilinear form
         L_proj = inner(sigma_expr, self.w) * dx  # Linear form (same as bilinear in this L2 projection case)
 
-        problem_stress = LinearProblem(a_proj, L_proj, u=self.sigma_projected)  # u=sigma_projected sets sigma_projected as the solution
+        problem_stress = LinearProblem(
+            a_proj,
+            L_proj,
+            u=self.sigma_projected,
+            petsc_options=self.linear_petsc_options,
+        )  # u=sigma_projected sets sigma_projected as the solution
         problem_stress.solve()
 
         node_forces = np.zeros(len(nodes) * 2)

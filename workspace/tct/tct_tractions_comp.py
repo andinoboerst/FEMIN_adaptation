@@ -31,12 +31,12 @@ class TCTApplyFixedTractions(get_TCT_class(DEFORMATION)):
 
 
 def compare_force_application() -> None:
-    tct = TCTExtractTractions()
+    tct = TCTExtractTractions(frequency=575)
     tct.run()
 
     tct.postprocess("u", "u", "y", "tractions_full")
 
-    tct_apply = TCTApplyFixedTractions(tct.data_out)
+    tct_apply = TCTApplyFixedTractions(tct.data_out, frequency=575)
     tct_apply.run()
 
     tct_apply.postprocess("u", "u", "y", "tractions_applied")
@@ -46,5 +46,15 @@ def compare_force_application() -> None:
     tct.postprocess(u_k_app_error, "u", "norm", "tractions_applied_error")
 
 
+def compare_force_application_v2() -> None:
+    with open("results/training_out_v11.npy", "rb") as f:
+        tractions = np.load(f)[8, :, :]
+
+    tct_apply = TCTApplyFixedTractions(tractions, frequency=1100)
+    tct_apply.run()
+
+    tct_apply.postprocess("u", "u", "y", "tractions_applied_test")
+
+
 if __name__ == "__main__":
-    compare_force_application()
+    compare_force_application_v2()

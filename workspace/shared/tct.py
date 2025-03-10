@@ -164,7 +164,13 @@ class _TCTSimulationTractions(_TCTSimulation):
     def calculate_interface_tractions(self) -> None:
         self.u_t.x.array[self.bottom_half_dofs_t] = self.u_k.x.array[self.bottom_half_dofs].copy()
 
-        problem = LinearProblem(self.a_t, self.L_t, bcs=self.get_dirichlet_bcs(self.V_t), u=self.f_res)
+        problem = LinearProblem(
+            self.a_t,
+            self.L_t,
+            bcs=self.get_dirichlet_bcs(self.V_t),
+            u=self.f_res,
+            petsc_options=self.linear_petsc_options,
+        )
         self.f_res = problem.solve()
 
         return self.f_res.x.array[self.interface_dofs_t].copy()
