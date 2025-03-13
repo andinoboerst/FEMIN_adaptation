@@ -57,4 +57,4 @@ def compare_force_application_v2() -> None:
 
 
 if __name__ == "__main__":
-    compare_force_application_v2()
+    compare_force_application()

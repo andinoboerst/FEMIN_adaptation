@@ -295,6 +295,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
     E = 200.0e3
     nu = 0.3
+    rho = 7.85e-9
 
     # Newmark-beta parameters
     beta = 0.25
@@ -312,8 +313,6 @@ class StructuralElasticSimulation(FenicsxSimulation):
     def _plot_variables(self) -> dict:
         return {
             "u": self.u_k.x.array.copy(),
-            "v": self.v_k.x.array.copy(),
-            "a": self.a_k.x.array.copy(),
         }
 
     def _solve_time_step(self) -> None:
@@ -322,6 +321,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
     def setup(self) -> None:
         self.mu = self.E / (2.0 * (1.0 + self.nu))
         self.lmbda = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
+        self.rho_dt = self.rho / self.dt**2
 
         super().setup()
 
@@ -333,15 +333,10 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self.u = TrialFunction(self.V)
         self.v = TestFunction(self.V)
         self.f = Constant(self.mesh, np.array([0.0, 0.0]))  # Force term
-        self.a = inner(self.sigma(self.u), self.epsilon(self.v)) * dx
-        self.L = inner(self.f, self.v) * dx
 
         self.u_k = Function(self.V, name="Displacement")
         self.u_prev = Function(self.V)
-        self.v_k = Function(self.V, name="Velocity")
-        self.v_prev = Function(self.V)
-        self.a_k = Function(self.V, name="Acceleration")
-        self.a_prev = Function(self.V)
+        self.u_next = Function(self.V)
 
         self.sigma_projected = Function(self.W)
         self.w = TestFunction(self.W)
@@ -349,20 +344,36 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
         # Initialize displacement and acceleration to zero
         self.u_k.x.array[:] = 0.0
-        self.a_prev.x.array[:] = 0.0  # Important initialization
+        self.u_prev.x.array[:] = 0.0  # Important initialization
 
-        # Temporary Functions for predictor step
-        self.u_pred = Function(self.V)
-        self.v_pred = Function(self.V)
+    def get_linear_equations(self, u, u_k, u_prev, f, v, V) -> tuple:
+        dx_ = Measure("dx", domain=V.mesh)
+        stiffness_term = inner(self.sigma(u), self.epsilon(v)) * dx_
+        mass_term = self.rho_dt * inner(u, v) * dx_
+        a = mass_term + stiffness_term
+
+        L_body = dot(f, v) * dx_
+        L_mass = self.rho_dt * inner((2 * u_k - u_prev), self.v) * dx_
+        L = self.apply_neumann_bcs(L_body + L_mass, V)
+
+        return a, L
+
+    def solve_linear_problem(self, a, L, V):
+        problem = LinearProblem(
+            a,
+            L,
+            bcs=self.get_dirichlet_bcs(V),
+            petsc_options=self.linear_petsc_options,
+        )
+        return problem.solve()
 
     def _define_differential_equations(self):
-        self.a = inner(self.sigma(self.u), self.epsilon(self.v)) * dx
-        self.L = self.apply_neumann_bcs(dot(self.f, self.v) * dx)
+
+        self.a, self.L = self.get_linear_equations(self.u, self.u_k, self.u_prev, self.f, self.v, self.V)
 
     def _update_prev_values(self) -> None:
         self.u_prev.x.array[:] = self.u_k.x.array[:]
-        self.v_prev.x.array[:] = self.v_k.x.array[:]
-        self.a_prev.x.array[:] = self.a_k.x.array[:]
+        self.u_k.x.array[:] = self.u_next.x.array[:]
 
     @staticmethod
     def epsilon(u):
@@ -373,57 +384,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
         return self.lmbda * tr(epsilon) * Identity(self.dim) + 2 * self.mu * epsilon
 
     def solve_u(self) -> None:
-        # Solve using Newmark-beta
-        # Predictor step
-        self.u_pred.x.array[:] = self.u_prev.x.array[:] + self.dt * self.v_prev.x.array[:] + 0.5 * self.dt**2 * (1 - 2 * self.beta) * self.a_prev.x.array[:]
-        self.v_pred.x.array[:] = self.v_prev.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
-
-        # Solve for acceleration (using u_pred as initial guess)
-        self.u_k.x.array[:] = self.u_pred.x.array[:]  # Set initial guess for the solver
-
-        problem = LinearProblem(
-            self.a,
-            self.L,
-            bcs=self.get_dirichlet_bcs(self.V),
-            u=self.u_k,
-            petsc_options=self.linear_petsc_options,
-        )
-        self.u_k = problem.solve()
-
-        # Corrector step
-        self.a_k.x.array[:] = (1 / (self.beta * self.dt**2)) * (self.u_k.x.array[:] - self.u_pred.x.array[:]) - ((1 - 2 * self.beta) / (2 * self.beta)) * self.a_prev.x.array[:]
-        self.v_k.x.array[:] = self.v_pred.x.array[:] + self.dt * self.gamma * self.a_k.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
-
-    def calculate_internal_forces(self, nodes) -> np.array:
-        # Project the stress to the function space W
-        sigma_expr = self.sigma(self.u_k)
-
-        # Define the *bilinear* and *linear* forms for the projection
-        a_proj = inner(self.tau, self.w) * dx  # Bilinear form
-        L_proj = inner(sigma_expr, self.w) * dx  # Linear form (same as bilinear in this L2 projection case)
-
-        problem_stress = LinearProblem(
-            a_proj,
-            L_proj,
-            u=self.sigma_projected,
-            petsc_options=self.linear_petsc_options,
-        )  # u=sigma_projected sets sigma_projected as the solution
-        problem_stress.solve()
-
-        node_forces = np.zeros(len(nodes) * 2)
-
-        normal_vector = [0, 1]
-
-        for i, node in enumerate(nodes):
-            sigma_xx = self.sigma_projected.x.array[4 * node]
-            sigma_xy = self.sigma_projected.x.array[4 * node + 1]
-            sigma_yy = self.sigma_projected.x.array[4 * node + 3]
-
-            # Compute the force components (accounting for element size)
-            node_forces[2 * i] = sigma_xx * normal_vector[0] + sigma_xy * normal_vector[1]
-            node_forces[2 * i + 1] = sigma_xy * normal_vector[0] + sigma_yy * normal_vector[1]
-
-        return node_forces
+        self.u_next = self.solve_linear_problem(self.a, self.L, self.V)
 
     def solve_time_step(self) -> None:
         super().solve_time_step()
@@ -516,14 +477,6 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         # print("delta_lambda values: ", np.linalg.norm(self.delta_lambda_func.x.array))
         # print("sigma correction values: ", np.linalg.norm(self.sigma_correction_func.x.array))
 
-        # Solve using Newmark-beta
-        # Predictor step
-        self.u_pred.x.array[:] = self.u_prev.x.array[:] + self.dt * self.v_prev.x.array[:] + 0.5 * self.dt**2 * (1 - 2 * self.beta) * self.a_prev.x.array[:]
-        self.v_pred.x.array[:] = self.v_prev.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
-
-        # Solve for acceleration (using u_pred as initial guess)
-        # self.u_k.x.array[:] = self.u_pred.x.array[:]  # Set initial guess for the solver
-
         # J = derivative(self.residual, self.u_k)
 
         # A = assemble_matrix(form(J), self.get_dirichlet_bcs())
@@ -575,10 +528,6 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         print(f"Solver converged ({converged}) in {n} iterations")
 
         print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array)}")
-
-        # Corrector step
-        self.a_k.x.array[:] = (1 / (self.beta * self.dt**2)) * (self.u_k.x.array[:] - self.u_pred.x.array[:]) - ((1 - 2 * self.beta) / (2 * self.beta)) * self.a_prev.x.array[:]
-        self.v_k.x.array[:] = self.v_pred.x.array[:] + self.dt * self.gamma * self.a_k.x.array[:] + self.dt * (1 - self.gamma) * self.a_prev.x.array[:]
 
     def check_export_results(self) -> bool:
         return self.step % 1 == 0

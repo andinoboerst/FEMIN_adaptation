@@ -115,6 +115,8 @@ class _TCTSimulationTractions(_TCTSimulation):
         self.f_interface = TrialFunction(self.V_t)
         self.f_t = Constant(self.mesh_t, np.array([0.0, 0.0]))
         self.u_t = Function(self.V_t)
+        self.u_t_prev = Function(self.V_t)
+        self.u_t_next = Function(self.V_t)
         self.f_res = Function(self.V_t)
         self.dx_t = Measure("dx", domain=self.mesh_t)
 
@@ -160,21 +162,19 @@ class _TCTSimulationTractions(_TCTSimulation):
         super()._define_differential_equations()
 
         self.a_t = dot(self.f_interface, self.v_t) * self.ds_t(self.interface_marker_t) + dot(self.f_interface, self.v_t) * self.dx_t - dot(self.f_interface, self.v_t) * self.dx_t
-        self.L_t = inner(self.sigma(self.u_t), self.epsilon(self.v_t)) * self.dx_t
+        self.L_t = self.apply_neumann_bcs(inner(self.sigma(self.u_t_next), self.epsilon(self.v_t)) * self.dx_t + self.rho_dt * inner((self.u_t_next - 2 * self.u_t + self.u_t_prev), self.v_t) * self.dx_t, self.V_t)
 
     def calculate_interface_tractions(self) -> None:
-        self.u_t.x.array[self.bottom_half_dofs_t] = self.u_k.x.array[self.bottom_half_dofs].copy()
+        self.u_t_next.x.array[self.bottom_half_dofs_t] = self.u_next.x.array[self.bottom_half_dofs].copy()
 
-        problem = LinearProblem(
-            self.a_t,
-            self.L_t,
-            bcs=self.get_dirichlet_bcs(self.V_t),
-            u=self.f_res,
-            petsc_options=self.linear_petsc_options,
-        )
-        self.f_res = problem.solve()
+        self.f_res = self.solve_linear_problem(self.a_t, self.L_t, self.V_t)
 
         return self.f_res.x.array[self.interface_dofs_t].copy()
+
+    def _update_prev_values(self) -> None:
+        super()._update_prev_values()
+        self.u_t_prev.x.array[:] = self.u_t.x.array[:]
+        self.u_t.x.array[:] = self.u_t_next.x.array[:]
 
 
 class _TCTSimulationTractionsPlastic(_TCTSimulation):

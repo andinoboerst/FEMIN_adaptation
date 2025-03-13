@@ -20,7 +20,7 @@ class TCTExtractDisp(get_TCT_class_tractions(DEFORMATION)):
 
         self.solve_u()
 
-        self.data_out[self.step, :] = self.u_k.x.array[self.interface_dofs]
+        self.data_out[self.step, :] = self.u_next.x.array[self.interface_dofs]
 
 
 class TCTApplyDisp(get_TCT_class_tractions(DEFORMATION)):

@@ -16,7 +16,7 @@ class TCTExtractTractions(get_TCT_class_tractions(DEFORMATION)):
         self.data_out = np.zeros((self.num_steps, len(self.interface_dofs)))
 
     def _solve_time_step(self):
-        self.data_in[self.step, :] = self.u_k.x.array[self.interface_dofs]
+        self.data_in[self.step, :] = self.u_next.x.array[self.interface_dofs]
 
         self.solve_u()
 
@@ -40,7 +40,11 @@ class TCTApplyTractions(get_TCT_class(DEFORMATION)):
 
     def _solve_time_step(self) -> None:
 
+        print("To predict: ", self.u_k.x.array[self.interface_dofs])
+
         prediction = self.predictor.predict(self.u_k.x.array[self.interface_dofs])
+
+        print("yesssss: ", prediction)
 
         self.update_neumann_bc(prediction, self.neumann_interface_marker)
 
