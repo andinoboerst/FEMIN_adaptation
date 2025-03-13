@@ -357,7 +357,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
     def _define_differential_equations(self):
         self.a = inner(self.sigma(self.u), self.epsilon(self.v)) * dx
-        self.L = self.apply_neumann_bcs(inner(self.f, self.v) * dx)
+        self.L = self.apply_neumann_bcs(dot(self.f, self.v) * dx)
 
     def _update_prev_values(self) -> None:
         self.u_prev.x.array[:] = self.u_k.x.array[:]

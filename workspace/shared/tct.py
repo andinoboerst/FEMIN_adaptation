@@ -3,7 +3,7 @@ from typing import Literal
 
 from mpi4py import MPI
 from dolfinx.mesh import create_rectangle, CellType, meshtags, locate_entities
-from ufl import TrialFunction, TestFunction, inner, Measure, sqrt, conditional
+from ufl import TrialFunction, TestFunction, inner, Measure, sqrt, conditional, dot
 from dolfinx.fem import Function, Constant, functionspace, dirichletbc, locate_dofs_topological
 from dolfinx.fem.petsc import LinearProblem
 
@@ -19,6 +19,7 @@ class _TCTSimulation(FenicsxSimulation):
     height = 50.0
     element_size_x = 5.0
     element_size_y = 5.0
+    corner_point = (0.0, 0.0)
 
     def __init__(self, frequency: int = 1000) -> None:
         super().__init__()
@@ -31,7 +32,7 @@ class _TCTSimulation(FenicsxSimulation):
         mesh = create_rectangle(
             MPI.COMM_WORLD,
             cell_type=CellType.quadrilateral,
-            points=((0.0, 0.0), (self.width, height)),
+            points=(self.corner_point, (self.width, height)),
             n=(self.nx, ny)
         )
 
@@ -158,7 +159,7 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        self.a_t = inner(self.f_interface, self.v_t) * self.ds_t(self.interface_marker_t) + inner(self.f_interface, self.v_t) * self.dx_t - inner(self.f_interface, self.v_t) * self.dx_t
+        self.a_t = dot(self.f_interface, self.v_t) * self.ds_t(self.interface_marker_t) + dot(self.f_interface, self.v_t) * self.dx_t - dot(self.f_interface, self.v_t) * self.dx_t
         self.L_t = inner(self.sigma(self.u_t), self.epsilon(self.v_t)) * self.dx_t
 
     def calculate_interface_tractions(self) -> None:
