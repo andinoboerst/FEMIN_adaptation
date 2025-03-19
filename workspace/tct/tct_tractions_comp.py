@@ -4,7 +4,7 @@ from tct.tct_tractions import TCTExtractTractions
 from shared.tct import get_TCT_class
 
 
-DEFORMATION = "elastic"  # or plastic
+DEFORMATION = "plastic"  # or plastic
 
 
 class TCTApplyFixedTractions(get_TCT_class(DEFORMATION)):
@@ -18,7 +18,7 @@ class TCTApplyFixedTractions(get_TCT_class(DEFORMATION)):
     def _preprocess(self) -> None:
         super()._preprocess()
 
-        self.bottom_half_nodes = self.get_nodes(self.bottom_half)
+        self.bottom_half_nodes = self.get_nodes(self.bottom_half_p)
 
         self.neumann_interface_marker = 88
 

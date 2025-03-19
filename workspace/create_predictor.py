@@ -107,7 +107,7 @@ if __name__ == "__main__":
     frequency = 1000
     predictor_method = "lstm"
     training_set_exists = True
-    predictor_model_exits = True
+    predictor_model_exits = False
 
     try:
         os.mkdir(DATA_FOLDER)

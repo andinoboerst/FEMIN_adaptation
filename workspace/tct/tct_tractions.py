@@ -4,7 +4,7 @@ import numpy as np
 from shared.tct import get_TCT_class, get_TCT_class_tractions
 
 
-DEFORMATION = "elastic"  # or plastic
+DEFORMATION = "plastic"  # or plastic
 
 
 class TCTExtractTractions(get_TCT_class_tractions(DEFORMATION)):
@@ -56,6 +56,9 @@ if __name__ == "__main__":
     # tct.time_total = 5e-5
     tct.run()
     tct.postprocess("u", "u", "y", "test5")
+
+    with open("tractions_test5.npy", "wb") as f:
+        np.save(f, tct.data_out)
 
     # with open("results/model_v07.pkl", "rb") as f:
     #     predictor = pickle.load(f)

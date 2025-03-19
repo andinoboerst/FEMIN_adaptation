@@ -107,27 +107,29 @@ class LSTMNetwork(FenicsxPredictor):
 
         # Assuming your input_data and target_data are lists of tensors
         dataset = SimulationDataset(input_data, target_data)
-        batch_size = input_data[0].size(0)  # Adjust as needed
+        # batch_size = input_data[0].size(0)  # Adjust as needed
+        batch_size = 1  # Adjust as needed
         self.train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)  # shuffle is false
 
         # Hyperparameters
         self.input_size = input_data[0].size(1)  # Number of features in your simulation
-        self.hidden_size = 128
+        self.hidden_size = 64
         self.output_size = target_data[0].size(1)  # Number of outputs to predict
-        self.num_layers = 2
+        self.num_layers = 10
         self.learning_rate = 0.01
-        self.num_epochs = 20
+        self.num_epochs = 50
         self.num_timesteps = input_data[0].size(0)  # All simulations have same length
 
     def fit(self) -> None:
         # Model, loss, and optimizer
         self._model = LSTMModel(self.input_size, self.hidden_size, self.output_size, self.num_layers)
-        criterion = nn.MSELoss()
+        criterion = nn.L1Loss()
         optimizer = torch.optim.Adam(self._model.parameters(), lr=self.learning_rate)
+
+        self._model.train()
 
         for epoch in range(self.num_epochs):
             for batch_inputs, batch_targets in self.train_loader:
-                self._model.train()
                 optimizer.zero_grad()
 
                 # Initialize hidden state for the batch
@@ -141,6 +143,9 @@ class LSTMNetwork(FenicsxPredictor):
 
                     # Forward pass
                     outputs, hidden = self._model(batch_input_t, hidden)
+
+                    # Apply dropout
+                    outputs = torch.dropout(outputs, p=0.1, train=True)
 
                     # Compute loss
                     loss = criterion(outputs.squeeze(1), batch_target_t)
@@ -158,19 +163,25 @@ class LSTMNetwork(FenicsxPredictor):
             self.save("current_lstm_model.pkl")
 
         print('Training finished!')
-        self._model.eval()
 
     def initialize_memory_variables(self) -> None:
+        self._model.eval()
         self.hidden = None
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         x_normalized = self.input_scaler.transform(x.reshape(1, -1))
 
+        print("x_normalized: ", x_normalized)
+
         x_tensor = torch.tensor(x_normalized, dtype=torch.float32)
         with torch.no_grad():
             predicted, self.hidden = self._model(x_tensor[None, :, :], self.hidden)
 
-        predicted_normalized = self.output_scaler.inverse_transform(predicted.detach().numpy()[0].reshape(1, -1))
+        print("predicted: ", predicted)
+
+        predicted_normalized = self.output_scaler.inverse_transform(predicted.detach().numpy()[0].reshape(1, -1))[0]
+
+        print("predicted_normalized: ", predicted_normalized)
 
         return predicted_normalized
 
