@@ -3,8 +3,8 @@ from typing import Literal
 
 from mpi4py import MPI
 from dolfinx.mesh import create_rectangle, CellType, meshtags, locate_entities
-from ufl import TrialFunction, TestFunction, inner, Measure, dot
-from dolfinx.fem import Function, Constant, functionspace
+from ufl import TrialFunction, Measure
+from dolfinx.fem import Function, functionspace
 
 from shared.fenicsx_sims import FenicsxSimulation, StructuralElasticSimulation, StructuralPlasticSimulation
 
@@ -108,14 +108,11 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _init_variables(self):
         super()._init_variables()
 
-        self.v_t = TestFunction(self.V_t)
         self.f_interface = TrialFunction(self.V_t)
-        self.f_t = Constant(self.mesh_t, np.array([0.0, 0.0]))
         self.u_t = Function(self.V_t)
         self.u_t_prev = Function(self.V_t)
         self.u_t_next = Function(self.V_t)
         self.f_res = Function(self.V_t)
-        self.dx_t = Measure("dx", domain=self.mesh_t)
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -158,9 +155,7 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        self.a_t = dot(self.f_interface, self.v_t) * self.ds_t(self.interface_marker_t) + dot(self.f_interface, self.v_t) * self.dx_t - dot(self.f_interface, self.v_t) * self.dx_t
-        self.L_t = self.apply_neumann_bcs(inner(self.sigma_elastic(self.u_t_next), self.epsilon(self.v_t)) * self.dx_t + self.rho_dt * inner((self.u_t_next - 2 * self.u_t + self.u_t_prev), self.v_t) * self.dx_t, self.V_t)
-        self.problem_t = self.get_linear_problem(self.a_t, self.L_t, self.get_dirichlet_bcs(self.V_t))
+        self.problem_t = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.u_t, self.u_t_prev, self.f_interface, self.ds_t, self.interface_marker_t))
 
     def calculate_interface_tractions(self) -> None:
         self.u_t_next.x.array[self.bottom_half_dofs_t] = self.u_next.x.array[self.bottom_half_dofs].copy()
@@ -195,14 +190,11 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
     def _init_variables(self):
         super()._init_variables()
 
-        self.v_t = TestFunction(self.V_t)
         self.f_interface = TrialFunction(self.V_t)
-        self.f_t = Constant(self.mesh_t, np.array([0.0, 0.0]))
         self.u_t = Function(self.V_t)
         self.u_t_prev = Function(self.V_t)
         self.u_t_next = Function(self.V_t)
         self.f_res = Function(self.V_t)
-        self.dx_t = Measure("dx", domain=self.mesh_t)
 
         self.alpha_k_t = Function(self.W_t)
 
@@ -247,9 +239,7 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        self.a_t = inner(self.f_interface, self.v_t) * self.ds_t(self.interface_marker_t) + inner(self.f_interface, self.v_t) * self.dx_t - inner(self.f_interface, self.v_t) * self.dx_t
-        self.L_t = inner(self.sigma_plastic(self.u_t_next, self.alpha_k_t), self.epsilon(self.v_t)) * self.dx_t + self.rho_dt * inner((self.u_t_next - 2 * self.u_t + self.u_t_prev), self.v_t) * self.dx_t
-        self.problem_t = self.get_linear_problem(self.a_t, self.L_t, self.get_dirichlet_bcs(self.V_t))
+        self.problem_t = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.u_t, self.u_t_prev, self.f_interface, self.ds_t, self.interface_marker_t, self.sigma_plastic, alpha=self.alpha_k_t))
 
     def calculate_interface_tractions(self) -> None:
         self.alpha_k_t.x.array[self.bottom_half_elements_sigma_t] = self.alpha_k.x.array[self.bottom_half_elements_sigma].copy()

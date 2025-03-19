@@ -10,7 +10,7 @@ from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem, NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx, sqrt, conditional, sym, gt
+from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, sqrt, conditional, sym, gt
 from petsc4py import PETSc
 
 from shared.plotting import format_vectors_from_flat, create_mesh_animation
@@ -21,12 +21,17 @@ logger = logging.getLogger("fenicsx_sims")
 
 class FenicsxSimulation(metaclass=abc.ABCMeta):
     # Time Stepping
-    # time_total = 3e-3
-    time_total = 1e-3
+    time_total = 3e-3
     dt = 5e-7
 
     element_type = ("CG", 1)
     element_type_sigma = ("DG", 0)
+
+    linear_petsc_options = {
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+        "pc_factor_mat_solver_type": "mumps",
+    }
 
     def __init__(self) -> None:
         pass
@@ -213,6 +218,59 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         neumann = self._neumann_bcs[marker]
         neumann[0].x.array[neumann[1]] = values
 
+    def get_projection_equations(self, u_result, V_proj=None) -> tuple:
+        if V_proj is None:
+            try:
+                V_proj = u_result.function_space
+            except AttributeError:
+                raise ValueError("V_proj is None and u_result is not a Function")
+
+        v = TestFunction(V_proj)
+        u_proj = TrialFunction(V_proj)
+
+        dx_ = Measure("dx", domain=V_proj.mesh)
+
+        a = inner(u_proj, v) * dx_
+        L = inner(u_result, v) * dx_
+
+        return a, L
+
+    def get_linear_problem(self, a, L, bcs=[]):
+        problem = LinearProblem(
+            a,
+            L,
+            bcs=bcs,
+            petsc_options=self.linear_petsc_options,
+        )
+        return problem
+
+    def get_nonlinear_problem(self, u, residual, bcs=[]):
+        problem = NonlinearProblem(
+            residual,
+            u,
+            bcs=bcs,
+        )
+        solver = NewtonSolver(MPI.COMM_WORLD, problem)
+
+        solver.max_it = 100  # Increase max iterations
+        solver.relaxation_parameter = 1.0  # Can reduce to 0.8 if needed
+        solver.damping = 1.0  # Reduce the step size to stabilize convergence
+        solver.ls = "bt"  # Use backtracking line search
+        solver.convergence_criterion = "residual"
+        solver.atol = 1e-6  # Absolute tolerance (adjust based on problem size)
+        solver.rtol = 1e-6  # Relative tolerance
+        ksp = solver.krylov_solver
+        opts = PETSc.Options()
+        option_prefix = ksp.getOptionsPrefix()
+        opts[f"{option_prefix}ksp_type"] = "gmres"
+        opts[f"{option_prefix}pc_type"] = "gamg"
+        # opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
+        ksp.setFromOptions()
+
+        solver.solve = partial(solver.solve, u)
+
+        return solver
+
     def check_export_results(self) -> bool:
         return self.step % 100 == 0
 
@@ -238,21 +296,15 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
     def format_results(self) -> None:
         for key, res in self.plot_results.items():
-
-            var = self._plot_variables()[key]
-            var_func_space = var.function_space
+            var_func_space = self._plot_variables()[key].function_space
             nodal_func_space = functionspace(var_func_space.mesh, ("CG", 1, (2,)))
 
             res_variable = Function(var_func_space)
-            project_variable = TrialFunction(nodal_func_space)
-            test_func = TestFunction(nodal_func_space)
 
-            dx_ = Measure("dx", domain=var_func_space.mesh)
-
-            problem = LinearProblem(inner(project_variable, test_func) * dx_, inner(res_variable, test_func) * dx_)
+            problem = self.get_linear_problem(*self.get_projection_equations(res_variable, nodal_func_space))
 
             new_res = []
-            for i, entry in enumerate(res):
+            for entry in res:
                 res_variable.x.array[:] = entry
                 new_res.append(problem.solve().x.array.copy())
 
@@ -321,12 +373,6 @@ class StructuralElasticSimulation(FenicsxSimulation):
     nu = 0.3
     rho = 7.85e-9
 
-    linear_petsc_options = {
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
-    }
-
     def __init__(self) -> None:
         super().__init__()
 
@@ -377,9 +423,12 @@ class StructuralElasticSimulation(FenicsxSimulation):
         epsilon = self.epsilon(u)
         return self.lmbda * tr(epsilon) * Identity(self.dim) + 2 * self.mu * epsilon
 
-    def get_problem_equations(self, u, u_k, u_prev, f, v, V, sigma_func=None, **sigma_kwargs) -> tuple:
+    def get_problem_equations(self, u, u_k, u_prev, f, sigma_func=None, **sigma_kwargs) -> tuple:
         if sigma_func is None:
             sigma_func = self.sigma_elastic
+
+        V = u_k.function_space
+        v = TestFunction(V)
 
         dx_ = Measure("dx", domain=V.mesh)
         stiffness_term = inner(sigma_func(u, **sigma_kwargs), self.epsilon(v)) * dx_
@@ -392,19 +441,23 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
         return a, L, self.get_dirichlet_bcs(V)
 
-    def get_linear_problem(self, a, L, bcs=[]):
-        problem = LinearProblem(
-            a,
-            L,
-            bcs=bcs,
-            petsc_options=self.linear_petsc_options,
-        )
-        return problem
+    def get_traction_equations(self, u_t_next, u_t, u_t_prev, f_interface, ds_t, interface_marker_t, sigma_func=None, **sigma_kwargs) -> tuple:
+        if sigma_func is None:
+            sigma_func = self.sigma_elastic
+
+        V_t = u_t_next.function_space
+        v_t = TestFunction(V_t)
+
+        dx_t = Measure("dx", domain=V_t.mesh)
+
+        a_t = dot(f_interface, v_t) * ds_t(interface_marker_t) + dot(f_interface, v_t) * dx_t - dot(f_interface, v_t) * dx_t
+        L_t = self.apply_neumann_bcs(inner(sigma_func(u_t_next, **sigma_kwargs), self.epsilon(v_t)) * dx_t + self.rho_dt * inner((u_t_next - 2 * u_t + u_t_prev), v_t) * dx_t, V_t)
+
+        return a_t, L_t, self.get_dirichlet_bcs(V_t)
 
     def _define_differential_equations(self):
 
-        a, L, bcs = self.get_problem_equations(self.u, self.u_k, self.u_prev, self.f, self.v, self.V)
-        self.elastic_problem = self.get_linear_problem(a, L, bcs)
+        self.elastic_problem = self.get_linear_problem(*self.get_problem_equations(self.u, self.u_k, self.u_prev, self.f))
 
     def _update_prev_values(self) -> None:
         self.u_prev.x.array[:] = self.u_k.x.array[:]
@@ -445,13 +498,13 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         return sqrt(3 / 2 * inner(sigma_dev - alpha, sigma_dev - alpha)) - self.sigma_yield
 
     def delta_epsilon(self, sigma_dev, alpha):
-        return self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
+        return (3 / 2) * self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
 
     def delta_alpha(self, sigma_dev, alpha):
         return (2 / 3) * self.C * self.delta_epsilon(sigma_dev, alpha)
 
     def delta_sigma(self, sigma_dev, alpha):
-        return - 2 * self.G * self.delta_epsilon(sigma_dev, alpha)
+        return 2 * self.G * self.delta_epsilon(sigma_dev, alpha) + self.lmbda * tr(self.delta_epsilon(sigma_dev, alpha)) * Identity(self.dim)
 
     def alpha_next(self, u, alpha):
         sigma_dev = self.sigma_dev(self.sigma_elastic(u))
@@ -462,44 +515,13 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         sigma_dev_trial = self.sigma_dev(sigma_trial)
         return conditional(gt(self.yield_function(sigma_dev_trial, alpha), self.tol), sigma_trial + self.delta_sigma(sigma_dev_trial, alpha), sigma_trial)
 
-    def get_nonlinear_problem(self, residual, u, bcs):
-        problem = NonlinearProblem(
-            residual,
-            u,
-            bcs=bcs,
-        )
-        solver = NewtonSolver(MPI.COMM_WORLD, problem)
-
-        solver.max_it = 100  # Increase max iterations
-        solver.relaxation_parameter = 1.0  # Can reduce to 0.8 if needed
-        solver.damping = 1.0  # Reduce the step size to stabilize convergence
-        solver.ls = "bt"  # Use backtracking line search
-        solver.convergence_criterion = "residual"
-        solver.atol = 1e-6  # Absolute tolerance (adjust based on problem size)
-        solver.rtol = 1e-6  # Relative tolerance
-        ksp = solver.krylov_solver
-        opts = PETSc.Options()
-        option_prefix = ksp.getOptionsPrefix()
-        opts[f"{option_prefix}ksp_type"] = "gmres"
-        opts[f"{option_prefix}pc_type"] = "gamg"
-        opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
-        ksp.setFromOptions()
-
-        solver.solve = partial(solver.solve, u)
-
-        return solver
-
     def _define_differential_equations(self):
-        a_sigma, L_sigma, bcs_sigma = self.get_problem_equations(self.u_next, self.u_k, self.u_prev, self.f, self.v, self.V, sigma_func=self.sigma_plastic, alpha=self.alpha_k)
-        self.plastic_problem = self.get_nonlinear_problem(a_sigma - L_sigma, self.u_next, bcs_sigma)
+        a_sigma, L_sigma, bcs_sigma = self.get_problem_equations(self.u_next, self.u_k, self.u_prev, self.f, sigma_func=self.sigma_plastic, alpha=self.alpha_k)
+        self.plastic_problem = self.get_nonlinear_problem(self.u_next, a_sigma - L_sigma, bcs_sigma)
 
-        a_alpha = inner(self.alpha_trial, self.w) * dx
-        b_alpha = inner(self.alpha_next(self.u_k, self.alpha_k), self.w) * dx
-        self.alpha_problem = self.get_linear_problem(a_alpha, b_alpha)
+        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next(self.u_k, self.alpha_k), self.W))
 
-        a_yield = inner(self.yield_trial, self.z) * dx
-        b_yield = inner(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.sigma_dev(self.alpha_k)), self.z) * dx
-        self.yield_problem = self.get_linear_problem(a_yield, b_yield)
+        self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.sigma_dev(self.alpha_k)), self.Z))
 
     def solve_u(self) -> None:
         # yield_res = self.yield_problem.solve().x.array
@@ -508,8 +530,7 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
 
         self.alpha_k.x.array[:] = self.alpha_problem.solve().x.array[:]
 
-        print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array)}")
-        print(f"Solved step {self.step}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array)}")
+        print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
 
         # print(self.alpha_k.x.array[:40])
         # print(yield_res[:10])

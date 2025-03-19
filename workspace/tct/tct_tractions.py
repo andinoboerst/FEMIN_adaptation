@@ -44,8 +44,6 @@ class TCTApplyTractions(get_TCT_class(DEFORMATION)):
 
         prediction = self.predictor.predict(self.u_k.x.array[self.interface_dofs])
 
-        print("yesssss: ", prediction)
-
         self.update_neumann_bc(prediction, self.neumann_interface_marker)
 
         self.solve_u()
