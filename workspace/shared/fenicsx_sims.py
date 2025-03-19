@@ -5,12 +5,12 @@ from functools import partial
 # import dill
 
 from mpi4py import MPI
-from dolfinx.fem import form, Constant, Expression, Function, functionspace, dirichletbc, locate_dofs_geometrical, locate_dofs_topological, element
+from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
-from dolfinx.fem.petsc import LinearProblem, NonlinearProblem, assemble_matrix, assemble_vector, create_matrix, _create_form, create_vector, assemble_matrix_mat
+from dolfinx.fem.petsc import LinearProblem, NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx, sqrt, conditional, sym, derivative, gt, eq
+from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, dx, sqrt, conditional, sym, gt
 from petsc4py import PETSc
 
 from shared.plotting import format_vectors_from_flat, create_mesh_animation
@@ -367,7 +367,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
         # Initialize displacement and acceleration to zero
         self.u_k.x.array[:] = 0.0
-        self.u_prev.x.array[:] = 0.0  # Important initialization
+        self.u_prev.x.array[:] = 0.0
 
     @staticmethod
     def epsilon(u):
@@ -419,159 +419,6 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self._update_prev_values()
 
 
-# class StructuralPlasticSimulationTest(StructuralElasticSimulation):
-#     sigma_yield = 250  # Yield stress (MPa)
-
-#     tol = 1e-6
-
-#     def _init_variables(self):
-#         super()._init_variables()
-
-#         self.w = TestFunction(self.W)
-#         self.z = TestFunction(self.Z)
-
-#         self.sig_elastic = Function(self.W)
-#         self.sig_elastic_trial = TrialFunction(self.W)
-#         self.sig_plastic = Function(self.W)
-#         self.sigma_final = Function(self.W)
-
-#         self.yield_trial = TrialFunction(self.Z)
-#         self.yield_projected = Function(self.Z)
-
-#         self.alpha_k = Function(self.W)
-#         self.alpha_k.x.array[:] = 0.0
-#         self.alpha_trial = TrialFunction(self.W)
-#         self.alpha_projected = Function(self.W)
-
-#     def _update_prev_values(self):
-#         super()._update_prev_values()
-
-#         # self.alpha_k.x.array[:] = self.alpha_problem.solve().x.array[:]
-#         yield_res = self.yield_func_problem.solve().x.array
-#         # print("\n", self.step)
-#         # print(self.alpha_k.x.array[:40])
-#         print(yield_res[:10])
-#         print(np.linalg.norm(yield_res))
-
-#         input("press enter")
-
-#         # self.epsilon_p_next.x.array[:] += self.epsilon_p_next.x.array[:]
-
-#     def sigma_dev(self, sigma):
-#         return sigma - (1 / 3) * tr(sigma) * Identity(self.dim)
-
-#     def yield_function(self, sigma_dev, alpha):
-#         return sqrt(3 / 2 * inner(sigma_dev - alpha, sigma_dev - alpha)) - self.sigma_yield
-
-#     def delta_gamma(self, sigma_dev, alpha):
-#         return self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C)
-
-#     def delta_epsilon(self, sigma_dev, alpha):
-#         return (sigma_dev - alpha) / sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
-
-#     def delta_alpha(self, sigma_dev, alpha):
-#         return (2 / 3) * self.C * self.delta_gamma(sigma_dev, alpha) * self.delta_epsilon(sigma_dev, alpha)
-
-#     def delta_sigma(self, sigma_dev, alpha):
-#         return - 2 * self.G * self.delta_gamma(sigma_dev, alpha) * self.delta_epsilon(sigma_dev, alpha)
-
-#     def alpha_n_plus_one(self, u, alpha):
-#         sigma_dev = self.sigma_dev(self.sigma_elastic(u))
-#         alpha_dev = self.sigma_dev(alpha)
-#         # return conditional(gt(self.yield_function(sigma_dev, alpha_dev), self.tol), alpha + self.delta_alpha(sigma_dev, alpha_dev), alpha)
-#         return alpha + self.delta_alpha(sigma_dev, alpha_dev)
-
-#     def sigma_plastic(self, sigma, alpha):
-#         sigma_dev = self.sigma_dev(sigma)
-#         alpha_dev = self.sigma_dev(alpha)
-#         # return conditional(gt(self.yield_function(sigma_dev_trial, alpha_dev), self.tol), sigma_trial + self.delta_sigma(sigma_dev_trial, alpha_dev), sigma_trial)
-#         return sigma + self.delta_sigma(sigma_dev, alpha_dev)
-
-#     def sigma_elastic_temp(self, sigma):
-#         return sigma
-
-#     def get_problem_equations_sigma(self, sigma, u_k, u_prev, f, v, V, sigma_func, **sigma_kwargs) -> tuple:
-
-#         dx_ = Measure("dx", domain=V.mesh)
-
-#         a = inner(sigma_func(sigma, **sigma_kwargs), self.epsilon(v)) * dx_
-
-#         L_body = dot(f, v) * dx_
-#         L_mass = self.rho_dt * inner((2 * u_k - u_prev), self.v) * dx_
-#         L = self.apply_neumann_bcs(L_body + L_mass, V)
-
-#         return a, L
-
-#     def _define_differential_equations(self):
-#         a, L = self.get_problem_equations_sigma(self.sig_plastic, self.u_k, self.u_prev, self.f, self.v, self.V, sigma_func=self.sigma_plastic, alpha=self.alpha_k)
-#         self.residual = a - L
-
-#         self.a_elastic, self.L_elastic = self.get_problem_equations(self.sig_elastic_trial, self.u_k, self.u_prev, self.f, self.v, self.V, sigma_func=self.sigma_elastic_temp)
-
-#         a_alpha = inner(self.alpha_trial, self.w) * dx
-#         b_alpha = inner(self.alpha_n_plus_one(self.u_next, self.alpha_k), self.w) * dx
-#         self.alpha_problem = LinearProblem(a_alpha, b_alpha)
-
-#         a_yield = inner(self.yield_trial, self.z) * dx
-#         b_yield = inner(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.sigma_dev(self.alpha_k)), self.z) * dx
-#         self.yield_problem = LinearProblem(a_yield, b_yield)
-
-#         a_u = inner(self.sigma_elastic(self.u), self.v) * dx
-#         b_u = inner(self.sigma_final, self.v) * dx
-#         self.u_problem = LinearProblem(a_u, b_u)
-
-#     def solve_nonlinear_problem(self, residual, u, V):
-#         problem = NonlinearProblem(
-#             residual,
-#             u,
-#             bcs=self.get_dirichlet_bcs(V),
-#         )
-#         solver = NewtonSolver(MPI.COMM_WORLD, problem)
-
-#         solver.max_it = 100  # Increase max iterations
-#         solver.relaxation_parameter = 1.0  # Can reduce to 0.8 if needed
-#         solver.damping = 1.0  # Reduce the step size to stabilize convergence
-#         solver.ls = "bt"  # Use backtracking line search
-#         solver.convergence_criterion = "residual"
-#         solver.atol = 1e-6  # Absolute tolerance (adjust based on problem size)
-#         solver.rtol = 1e-6  # Relative tolerance
-#         ksp = solver.krylov_solver
-#         opts = PETSc.Options()
-#         option_prefix = ksp.getOptionsPrefix()
-#         opts[f"{option_prefix}ksp_type"] = "gmres"
-#         opts[f"{option_prefix}pc_type"] = "gamg"
-#         opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
-#         ksp.setFromOptions()
-
-#         n, converged = solver.solve(u)
-
-#         print(f"Solver converged ({converged}) in {n} iterations")
-#         print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array)}")
-#         print(f"Solved step {self.step}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array)}")
-
-#         return u
-
-#     def solve_u(self) -> None:
-
-#         self.sig_plastic = self.solve_nonlinear_problem(self.residual, self.sig_plastic, self.V)
-
-#         self.sig_elastic = self.solve_linear_problem(self.a_elastic, self.L_elastic, self.V)
-
-#         self.yield_projected = self.yield_problem.solve()
-
-#         self.alpha_projected = self.alpha_problem.solve()
-
-#         plastic_entries = self.yield_projected.x.array[:] > self.tol
-#         self.alpha_k.x.array[plastic_entries] = self.alpha_projected.x.array[plastic_entries]
-#         self.sigma_final.x.array[:] = self.sig_elastic.x.array[:]
-#         self.sigma_final.x.array[plastic_entries] = self.sig_plastic.x.array[plastic_entries]
-
-#         self.u_next = self.u_problem.solve()
-
-#     def check_export_results(self) -> bool:
-#         return self.step % 50 == 0
-
-
 class StructuralPlasticSimulation(StructuralElasticSimulation):
     sigma_yield = 250  # Yield stress (MPa)
 
@@ -608,16 +455,12 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
 
     def alpha_next(self, u, alpha):
         sigma_dev = self.sigma_dev(self.sigma_elastic(u))
-        # alpha_dev = self.sigma_dev(alpha)
         return conditional(gt(self.yield_function(sigma_dev, alpha), self.tol), alpha + self.delta_alpha(sigma_dev, alpha), alpha)
-        # return alpha + self.delta_alpha(sigma_dev, alpha_dev)
 
     def sigma_plastic(self, u, alpha):
         sigma_trial = self.sigma_elastic(u)
         sigma_dev_trial = self.sigma_dev(sigma_trial)
-        # alpha_dev = self.sigma_dev(alpha)
         return conditional(gt(self.yield_function(sigma_dev_trial, alpha), self.tol), sigma_trial + self.delta_sigma(sigma_dev_trial, alpha), sigma_trial)
-        # return sigma_trial + self.delta_sigma(sigma_dev_trial, alpha_dev)
 
     def get_nonlinear_problem(self, residual, u, bcs):
         problem = NonlinearProblem(
@@ -676,144 +519,3 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
 
     def check_export_results(self) -> bool:
         return self.step % 50 == 0
-
-
-class StructuralPlasticSimulation_old(StructuralElasticSimulation):
-    sigma_Y = 250e15  # Yield stress (MPa)
-    C_k = 1  # Kinematic hardening modulus
-
-    def sigma_dev(self, sigma):
-        return sigma - (1 / 3) * tr(sigma) * Identity(2)
-
-    def _init_variables(self):
-        super()._init_variables()
-
-        self.DG0 = functionspace(self.mesh, ("DG", 0))
-
-        # self.sigma_old = Function(self.W)
-        self.alpha_old = Function(self.W)
-        self.eps_p_old = Function(self.W)
-
-        self.sigma_correction_func = Function(self.W)
-
-        self.f_trial_func = Function(self.DG0)
-        self.delta_lambda_func = Function(self.DG0)
-        self.sigma_trial_func = Function(self.W)
-        self.s_trial_func = Function(self.W)
-
-    def _define_differential_equations(self):
-        # super()._define_differential_equations()
-
-        # Define elastic trial stress
-        self.sigma_trial = self.sigma_elastic(self.u_k)
-        self.s_trial = self.sigma_dev(self.sigma_trial)
-
-        # Compute yield function
-        self.f_trial = sqrt(inner(self.s_trial - self.alpha_old, self.s_trial - self.alpha_old)) - self.sigma_Y
-
-        # Return mapping (Plastic correction)
-        self.delta_lambda = conditional(self.f_trial > 0, self.f_trial / (2 * self.mu + self.C_k), 0)
-
-        norm_s = sqrt(inner(self.s_trial - self.alpha_old, self.s_trial - self.alpha_old))
-        self.eps_p_correction = self.delta_lambda * (self.s_trial - self.alpha_old) / conditional(norm_s > 1e-8, norm_s, 1e-8)
-        self.eps_p_new = self.eps_p_old + self.eps_p_correction
-
-        self.alpha_correction = self.C_k * (self.eps_p_new - self.eps_p_old)
-        self.alpha_new = self.alpha_old + self.alpha_correction
-
-        # Compute updated stress
-        self.sigma_correction = - 2 * self.mu * (self.eps_p_new - self.eps_p_old)
-        self.sigma_new = self.sigma_elastic(self.u_k) + self.sigma_correction
-
-        # Define variational problem
-        # self.residual = self.apply_neumann_bcs(inner(self.f, self.v) * dx - inner(self.sigma_new, self.epsilon(self.v)) * dx)
-        self.residual = inner(self.sigma_elastic(self.u_k), self.epsilon(self.v)) * dx
-
-        # Define interpolations
-        self.eps_p_expr = Expression(self.eps_p_new, self.W.element.interpolation_points())
-        self.alpha_expr = Expression(self.alpha_new, self.W.element.interpolation_points())
-
-        self.f_trial_expr = Expression(self.f_trial, self.DG0.element.interpolation_points())
-        self.delta_lambda_expr = Expression(self.delta_lambda, self.DG0.element.interpolation_points())
-        self.sigma_trial_expr = Expression(self.sigma_trial, self.W.element.interpolation_points())
-        self.s_trial_expr = Expression(self.s_trial, self.W.element.interpolation_points())
-
-        self.sigma_correction_expr = Expression(self.sigma_correction, self.sigma_correction_func.function_space.element.interpolation_points())
-
-    def _update_prev_values(self) -> None:
-        super()._update_prev_values()
-
-        # Update values
-        self.eps_p_old.interpolate(self.eps_p_expr)
-        self.alpha_old.interpolate(self.alpha_expr)
-
-    def bottom_displacement_function_new(self, t):
-        return self.amplitude * np.sin(self.omega * t)
-
-    def solve_u(self) -> None:
-
-        self.sigma_correction_func.interpolate(self.sigma_correction_expr)
-        self.f_trial_func.interpolate(self.f_trial_expr)
-        self.delta_lambda_func.interpolate(self.delta_lambda_expr)
-        self.sigma_trial_func.interpolate(self.sigma_trial_expr)
-        self.s_trial_func.interpolate(self.s_trial_expr)
-        # print("sigma_trial values: ", np.linalg.norm(self.sigma_trial_func.x.array))
-        # print("s_trial values: ", np.linalg.norm(self.s_trial_func.x.array))
-        # print("f_trial values: ", np.linalg.norm(self.f_trial_func.x.array))
-        # print("delta_lambda values: ", np.linalg.norm(self.delta_lambda_func.x.array))
-        # print("sigma correction values: ", np.linalg.norm(self.sigma_correction_func.x.array))
-
-        # J = derivative(self.residual, self.u_k)
-
-        # A = assemble_matrix(form(J), self.get_dirichlet_bcs())
-        # A.assemble()
-
-        # row_idx = 10  # Example row index
-        # row_values = A.getRow(row_idx)
-        # print(f"Row {row_idx} values: {row_values}")
-
-        # ksp = PETSc.KSP().create(A.getComm())
-        # ksp.setOperators(A)
-        # ksp.setType("gmres")  # Use GMRES to analyze conditioning
-
-        # # Compute and print condition number
-        # A_norm = A.norm()
-        # A_inv_norm = 1 / A_norm if A_norm > 1e-12 else np.inf  # Avoid division by zero
-        # condition_number = A_norm * A_inv_norm
-        # print(f"Condition number of Jacobian: {condition_number}")
-
-        R_norm = np.linalg.norm(assemble_vector(form(self.residual)).array)
-        print(f"Residual norm at iteration {self.step}: {R_norm}")
-
-        # quit()
-
-        problem = NonlinearProblem(self.residual, self.u_k, bcs=self.get_dirichlet_bcs())
-        solver = NewtonSolver(MPI.COMM_WORLD, problem)
-
-        solver.max_it = 10000  # Increase max iterations
-        # solver.relaxation_parameter = 1.0  # Can reduce to 0.8 if needed
-        # solver.damping = 1.0  # Reduce the step size to stabilize convergence
-        # solver.ls = "bt"  # Use backtracking line search
-        # solver.krylov_solver.setType("gmres")
-        # solver.krylov_solver.getPC().setType("ilu")  # Algebraic multigrid
-        # solver.convergence_criterion = "residual"
-        # solver.krylov_solver = "gmres"  # More robust for nonlinear problems
-        # solver.preconditioner = "ilu"   # Incomplete LU factorization for stability
-        # solver.atol = 1e-6  # Absolute tolerance (adjust based on problem size)
-        # solver.rtol = 1e-6  # Relative tolerance
-        # ksp = solver.krylov_solver
-        # opts = PETSc.Options()
-        # option_prefix = ksp.getOptionsPrefix()
-        # opts[f"{option_prefix}ksp_type"] = "gmres"
-        # # opts[f"{option_prefix}pc_type"] = "gamg"
-        # # opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
-        # ksp.setFromOptions()
-
-        n, converged = solver.solve(self.u_k)
-
-        print(f"Solver converged ({converged}) in {n} iterations")
-
-        print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array)}")
-
-    def check_export_results(self) -> bool:
-        return self.step % 1 == 0

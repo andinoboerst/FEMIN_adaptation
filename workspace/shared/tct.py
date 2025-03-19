@@ -3,9 +3,8 @@ from typing import Literal
 
 from mpi4py import MPI
 from dolfinx.mesh import create_rectangle, CellType, meshtags, locate_entities
-from ufl import TrialFunction, TestFunction, inner, Measure, sqrt, conditional, dot
-from dolfinx.fem import Function, Constant, functionspace, dirichletbc, locate_dofs_topological
-from dolfinx.fem.petsc import LinearProblem
+from ufl import TrialFunction, TestFunction, inner, Measure, dot
+from dolfinx.fem import Function, Constant, functionspace
 
 from shared.fenicsx_sims import FenicsxSimulation, StructuralElasticSimulation, StructuralPlasticSimulation
 
@@ -85,14 +84,6 @@ class _TCTSimulation(FenicsxSimulation):
     @staticmethod
     def not_interface_boundary(x):
         return x[1] < 24.6
-
-    # @staticmethod
-    # def bottom_half(x):
-    #     return x[1] <= 25 * np.isclose(x[1], 25)
-
-    # @staticmethod
-    # def not_interface_boundary(x):
-    #     return x[1] < 25 * ~np.isclose(x[1], 25)
 
     def solve_time_step(self) -> None:
         self.update_dirichlet_bc(self.bottom_displacement_function(self.time), self.bottom_boundary_marker)
@@ -214,16 +205,6 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
         self.dx_t = Measure("dx", domain=self.mesh_t)
 
         self.alpha_k_t = Function(self.W_t)
-        # self.sigma_new_t = Function(self.W_t)
-
-        # dx = Measure("dx", domain=self.mesh)
-        # sigma_new = TrialFunction(self.W)
-        # w = TestFunction(self.W)
-
-        # a = inner(sigma_new, w) * dx
-        # b = inner(self.sigma_plastic(self.u_next), w) * dx
-
-        # self.sigma_new_problem = LinearProblem(a, b)
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -266,30 +247,15 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        # Define variational problem
-        # self.residual_t = self.apply_neumann_bcs(inner(self.f_res, self.v_t) * self.ds_t(self.interface_marker_t) + inner(self.f_t, self.v_t) * self.dx_t - inner(self.sigma_new_t, self.epsilon(self.v_t)) * self.dx_t, self.V_t)
-
         self.a_t = inner(self.f_interface, self.v_t) * self.ds_t(self.interface_marker_t) + inner(self.f_interface, self.v_t) * self.dx_t - inner(self.f_interface, self.v_t) * self.dx_t
-        # self.L_t = inner(self.sigma_new_t, self.epsilon(self.v_t)) * self.dx_t + self.rho_dt * inner((self.u_t_next - 2 * self.u_t + self.u_t_prev), self.v_t) * self.dx_t
         self.L_t = inner(self.sigma_plastic(self.u_t_next, self.alpha_k_t), self.epsilon(self.v_t)) * self.dx_t + self.rho_dt * inner((self.u_t_next - 2 * self.u_t + self.u_t_prev), self.v_t) * self.dx_t
         self.problem_t = self.get_linear_problem(self.a_t, self.L_t, self.get_dirichlet_bcs(self.V_t))
 
-        # self.problem_t = LinearProblem(self.a_t, self.L_t, bcs=self.get_dirichlet_bcs(self.V_t), petsc_options=self.linear_petsc_options)
-
     def calculate_interface_tractions(self) -> None:
-        # self.u_t.x.array[self.bottom_half_dofs_t] = self.u_k.x.array[self.bottom_half_dofs].copy()
-
-        # problem = NonlinearProblem(self.residual_t, self.f_res, bcs=self.get_dirichlet_bcs(self.V_t))
-        # solver = NewtonSolver(MPI.COMM_WORLD, problem)
-        # solver.solve(self.u_k)
-        # self.sigma_new_t.x.array[self.bottom_half_elements_sigma_t] = self.sigma_new_problem.solve().x.array[self.bottom_half_elements_sigma].copy()
         self.alpha_k_t.x.array[self.bottom_half_elements_sigma_t] = self.alpha_k.x.array[self.bottom_half_elements_sigma].copy()
         self.u_t_next.x.array[self.bottom_half_dofs_t] = self.u_next.x.array[self.bottom_half_dofs].copy()
 
         self.f_res = self.problem_t.solve()
-
-        # problem = LinearProblem(self.a_t, self.L_t, bcs=self.get_dirichlet_bcs(self.V_t), petsc_options=self.linear_petsc_options)
-        # self.f_res = self.problem_t.solve()
 
         return self.f_res.x.array[self.interface_dofs_t].copy()
 
