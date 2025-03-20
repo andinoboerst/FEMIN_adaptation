@@ -109,9 +109,10 @@ class _TCTSimulationTractions(_TCTSimulation):
         super()._init_variables()
 
         self.f_interface = TrialFunction(self.V_t)
-        self.u_t = Function(self.V_t)
-        self.u_t_prev = Function(self.V_t)
         self.u_t_next = Function(self.V_t)
+        self.u_t_k = Function(self.V_t)
+        self.v_t_k = Function(self.V_t)
+        self.a_t_k = Function(self.V_t)
         self.f_res = Function(self.V_t)
 
     def _preprocess(self) -> None:
@@ -155,19 +156,17 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        self.problem_t = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.u_t, self.u_t_prev, self.f_interface, self.ds_t, self.interface_marker_t))
+        self.problem_t = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.u_t_k, self.v_t_k, self.a_t_k, self.f_interface, self.ds_t, self.interface_marker_t))
 
     def calculate_interface_tractions(self) -> None:
         self.u_t_next.x.array[self.bottom_half_dofs_t] = self.u_next.x.array[self.bottom_half_dofs].copy()
+        self.u_t_k.x.array[self.bottom_half_dofs_t] = self.u_k.x.array[self.bottom_half_dofs].copy()
+        self.v_t_k.x.array[self.bottom_half_dofs_t] = self.v_k.x.array[self.bottom_half_dofs].copy()
+        self.a_t_k.x.array[self.bottom_half_dofs_t] = self.a_k.x.array[self.bottom_half_dofs].copy()
 
         self.f_res = self.problem_t.solve()
 
         return self.f_res.x.array[self.interface_dofs_t].copy()
-
-    def _update_prev_values(self) -> None:
-        super()._update_prev_values()
-        self.u_t_prev.x.array[:] = self.u_t.x.array[:]
-        self.u_t.x.array[:] = self.u_t_next.x.array[:]
 
 
 class _TCTSimulationTractionsPlastic(_TCTSimulation):

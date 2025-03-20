@@ -4,7 +4,7 @@ import numpy as np
 from shared.tct import get_TCT_class, get_TCT_class_tractions
 
 
-DEFORMATION = "plastic"  # or plastic
+DEFORMATION = "elastic"  # or plastic
 
 
 class TCTExtractTractions(get_TCT_class_tractions(DEFORMATION)):
@@ -20,7 +20,7 @@ class TCTExtractTractions(get_TCT_class_tractions(DEFORMATION)):
 
         self.solve_u()
 
-        # self.data_out[self.step, :] = self.calculate_interface_tractions()
+        self.data_out[self.step, :] = self.calculate_interface_tractions()
 
 
 class TCTApplyTractions(get_TCT_class(DEFORMATION)):
@@ -51,8 +51,8 @@ class TCTApplyTractions(get_TCT_class(DEFORMATION)):
 
 if __name__ == "__main__":
     tct = TCTExtractTractions()
-    tct.time_total = 5e-4
-    tct.dt = 2e-7
+    # tct.time_total = 5e-4
+    # tct.dt = 2e-7
     tct.run()
     tct.postprocess("u", "u", "y", "test5")
 
