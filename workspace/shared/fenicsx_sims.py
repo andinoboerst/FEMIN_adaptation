@@ -10,7 +10,7 @@ from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem, NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, sqrt, conditional, sym, gt
+from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, sqrt, conditional, sym, gt, eq, And, dx
 from petsc4py import PETSc
 
 from shared.plotting import format_vectors_from_flat, create_mesh_animation
@@ -400,16 +400,11 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
     def _init_variables(self) -> None:
         self.u = TrialFunction(self.V)
-        self.v = TestFunction(self.V)
         self.f = Constant(self.mesh, np.array([0.0, 0.0]))  # Force term
 
         self.u_k = Function(self.V, name="Displacement")
         self.u_prev = Function(self.V)
         self.u_next = Function(self.V)
-
-        self.sigma_projected = Function(self.W)
-        self.w = TestFunction(self.W)
-        self.tau = TrialFunction(self.W)
 
         # Initialize displacement and acceleration to zero
         self.u_k.x.array[:] = 0.0
@@ -436,7 +431,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
         a = mass_term + stiffness_term
 
         L_body = dot(f, v) * dx_
-        L_mass = self.rho_dt * inner((2 * u_k - u_prev), self.v) * dx_
+        L_mass = self.rho_dt * inner((2 * u_k - u_prev), v) * dx_
         L = self.apply_neumann_bcs(L_body + L_mass, V)
 
         return a, L, self.get_dirichlet_bcs(V)
@@ -480,9 +475,14 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
     def _init_variables(self):
         super()._init_variables()
 
+        self.zero_alpha = Function(self.W)
+        self.zero_alpha.x.array[:] = 0.0
+
         self.Z = functionspace(self.mesh, self.element_type_sigma)
         self.yield_trial = TrialFunction(self.Z)
-        self.yield_projected = Function(self.Z)
+        self.yield_k = Function(self.Z)
+        self.yield_k.x.array[:] = 0.0
+        self.yield_diff = Function(self.Z)
         self.z = TestFunction(self.Z)
 
         self.alpha_k = Function(self.W)
@@ -497,8 +497,15 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
     def yield_function(self, sigma_dev, alpha):
         return sqrt(3 / 2 * inner(sigma_dev - alpha, sigma_dev - alpha)) - self.sigma_yield
 
+    def yield_condition(self, sigma_dev, alpha):
+        # return conditional(gt(self.yield_function(sigma_dev, alpha), self.tol), 1, 0)
+        # return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_k, self.tol)), 1, 0)
+        return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_k)), alpha), self.tol)), 1, 0)
+        # return conditional(gt((self.yield_function(sigma_dev, alpha) - self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_k)), alpha) / 2), self.tol), 1, 0)
+
     def delta_epsilon(self, sigma_dev, alpha):
-        return (3 / 2) * self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
+        norm = sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
+        return conditional(gt(norm, self.tol), (3 / 2) * self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / norm, self.zero_alpha)
 
     def delta_alpha(self, sigma_dev, alpha):
         return (2 / 3) * self.C * self.delta_epsilon(sigma_dev, alpha)
@@ -508,33 +515,165 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
 
     def alpha_next(self, u, alpha):
         sigma_dev = self.sigma_dev(self.sigma_elastic(u))
-        return conditional(gt(self.yield_function(sigma_dev, alpha), self.tol), alpha + self.delta_alpha(sigma_dev, alpha), alpha)
+        return conditional(eq(self.yield_condition(sigma_dev, alpha), 1), alpha + self.delta_alpha(sigma_dev, alpha), alpha)
 
     def sigma_plastic(self, u, alpha):
         sigma_trial = self.sigma_elastic(u)
         sigma_dev_trial = self.sigma_dev(sigma_trial)
-        return conditional(gt(self.yield_function(sigma_dev_trial, alpha), self.tol), sigma_trial + self.delta_sigma(sigma_dev_trial, alpha), sigma_trial)
+        return conditional(eq(self.yield_condition(sigma_dev_trial, alpha), 1), sigma_trial + self.delta_sigma(sigma_dev_trial, alpha), sigma_trial)
 
     def _define_differential_equations(self):
         a_sigma, L_sigma, bcs_sigma = self.get_problem_equations(self.u_next, self.u_k, self.u_prev, self.f, sigma_func=self.sigma_plastic, alpha=self.alpha_k)
         self.plastic_problem = self.get_nonlinear_problem(self.u_next, a_sigma - L_sigma, bcs_sigma)
 
-        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next(self.u_k, self.alpha_k), self.W))
+        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next(self.u_next, self.alpha_k), self.W))
 
-        self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.sigma_dev(self.alpha_k)), self.Z))
+        self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
+
+        self.yield_condition_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_condition(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
 
     def solve_u(self) -> None:
-        # yield_res = self.yield_problem.solve().x.array
+        # yield_next = self.yield_problem.solve().x.array.copy()
 
-        self.plastic_problem.solve()
+        # self.yield_diff.x.array[:] = yield_next - self.yield_k.x.array[:]
 
-        self.alpha_k.x.array[:] = self.alpha_problem.solve().x.array[:]
+        n, converged = self.plastic_problem.solve()
+
+        # yield_condition = self.yield_condition_problem.solve().x.array.copy()
+
+        # self.yield_k.x.array[:] = self.yield_problem.solve().x.array.copy()
+
+        self.alpha_k.x.array[:] = self.alpha_problem.solve().x.array.copy()
+
+        print(f"Solved step {self.step} in {n} iterations, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
+
+        # print(self.alpha_k.x.array[:40])
+        # print(self.yield_k.x.array[:10])
+        # print(yield_condition[:10])
+        # print(self.yield_diff.x.array[:10])
+        # print((self.yield_k.x.array > 0).mean())
+        # print((self.yield_diff.x.array > 0).mean())
+
+        # input("press enter")
+
+    def check_export_results(self) -> bool:
+        return self.step % 50 == 0
+
+
+class StructuralPlasticSimulationTest(StructuralElasticSimulation):
+    sigma_yield = 250  # Yield stress (MPa)
+
+    tol = 1e-6
+
+    def _init_variables(self):
+        super()._init_variables()
+
+        self.v = TestFunction(self.V)
+
+        self.zero_alpha = Function(self.W)
+        self.zero_alpha.x.array[:] = 0.0
+
+        self.u_next_plastic = Function(self.V)
+        self.u_next_plastic.x.array[:] = 0.0
+        self.u_next_elastic = Function(self.V)
+
+        self.u_mixed_trial = TrialFunction(self.V)
+        self.u_mixed_k = Function(self.V)
+
+        self.sigma_mixed = Function(self.W)
+
+        self.u_sigma_plastic = TrialFunction(self.V)
+        self.u_sigma_elastic = TrialFunction(self.V)
+
+        self.Z = functionspace(self.mesh, self.element_type_sigma)
+        self.yield_trial = TrialFunction(self.Z)
+        self.yield_k = Function(self.Z)
+        self.yield_k.x.array[:] = 0.0
+        self.yield_diff = Function(self.Z)
+        self.z = TestFunction(self.Z)
+
+        self.alpha_k = Function(self.W)
+        self.alpha_k.x.array[:] = 0.0
+        self.alpha_trial = TrialFunction(self.W)
+        self.w = TestFunction(self.W)
+        self.alpha_projected = Function(self.W)
+
+    def sigma_dev(self, sigma):
+        return sigma - (1 / 3) * tr(sigma) * Identity(self.dim)
+
+    def yield_function(self, sigma_dev, alpha):
+        return sqrt(3 / 2 * inner(sigma_dev - alpha, sigma_dev - alpha)) - self.sigma_yield
+
+    def yield_condition(self, sigma_dev, alpha):
+        # return conditional(gt(self.yield_function(sigma_dev, alpha), self.tol), 1, 0)
+        return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_k, self.tol)), 1, 0)
+
+    def delta_epsilon(self, sigma_dev, alpha):
+        norm = sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
+        return conditional(gt(norm, self.tol), (3 / 2) * self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / norm, self.zero_alpha)
+
+    def delta_alpha(self, sigma_dev, alpha):
+        return (2 / 3) * self.C * self.delta_epsilon(sigma_dev, alpha)
+
+    def delta_sigma(self, sigma_dev, alpha):
+        return 2 * self.G * self.delta_epsilon(sigma_dev, alpha) + self.lmbda * tr(self.delta_epsilon(sigma_dev, alpha)) * Identity(self.dim)
+
+    def alpha_next(self, u, alpha):
+        sigma_dev = self.sigma_dev(self.sigma_elastic(u))
+        return alpha + self.delta_alpha(sigma_dev, alpha)
+
+    def sigma_plastic(self, u, alpha):
+        sigma_trial = self.sigma_elastic(u)
+        sigma_dev_trial = self.sigma_dev(sigma_trial)
+        return sigma_trial + self.delta_sigma(sigma_dev_trial, alpha)
+
+    def _define_differential_equations(self):
+        a_plastic, L_plastic, bcs_plastic = self.get_problem_equations(self.u_next_plastic, self.u_k, self.u_prev, self.f, sigma_func=self.sigma_plastic, alpha=self.alpha_k)
+        self.plastic_problem = self.get_nonlinear_problem(self.u_next_plastic, a_plastic - L_plastic, bcs_plastic)
+
+        a_elastic, L_elastic, bcs_elastic = self.get_problem_equations(self.u, self.u_k, self.u_prev, self.f, sigma_func=self.sigma_elastic)
+        self.elastic_problem = self.get_linear_problem(a_elastic, L_elastic, bcs_elastic)
+
+        self.sigma_plastic_problem = self.get_linear_problem(*self.get_projection_equations(self.sigma_plastic(self.u_next_plastic, self.alpha_k), self.W))
+        self.sigma_elastic_problem = self.get_linear_problem(*self.get_projection_equations(self.sigma_elastic(self.u_next_elastic), self.W))
+
+        a_u_problem = self.rho_dt * inner(self.u_mixed_trial, self.v) * dx
+        b_u_problem = dot(self.f, self.v) * dx + self.rho_dt * inner((2 * self.u_k - self.u_prev), self.v) * dx - inner(self.sigma_mixed, self.epsilon(self.v)) * dx
+        self.u_problem = self.get_linear_problem(a_u_problem, b_u_problem, self.get_dirichlet_bcs(self.V))
+
+        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next(self.u_k, self.alpha_k), self.W))
+
+        self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_condition(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
+
+    def solve_u(self) -> None:
+        # yield_next = self.yield_problem.solve().x.array.copy()
+
+        # self.yield_diff.x.array[:] = yield_next - self.yield_k.x.array[:]
+
+        print(self.alpha_k.x.array[:40])
+
+        self.yield_k.x.array[:] = self.yield_problem.solve().x.array.copy()
+        yielded_dofs = np.concatenate(np.dstack((self.yield_k.x.array[:], self.yield_k.x.array[:], self.yield_k.x.array[:], self.yield_k.x.array[:]))[0]).astype(np.int64)
+
+        print(yielded_dofs)
+
+        self.u_next_elastic.x.array[:] = self.elastic_problem.solve().x.array[:]  # solves u_next_elastic
+        self.sigma_mixed.x.array[:] = self.sigma_elastic_problem.solve().x.array[:]
+        if yielded_dofs.sum() > 0:
+            print("updating yield")
+            self.plastic_problem.solve()  # solves u_next_plastic
+            self.alpha_k.x.array[yielded_dofs] = self.alpha_problem.solve().x.array[yielded_dofs]
+            self.sigma_mixed.x.array[yielded_dofs] = self.sigma_plastic_problem.solve().x.array[yielded_dofs]
+
+        self.u_next.x.array[:] = self.u_problem.solve().x.array[:]
 
         print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
 
-        # print(self.alpha_k.x.array[:40])
-        # print(yield_res[:10])
-        # print((yield_res > 0).mean())
+        print(self.alpha_k.x.array[:40])
+        print((self.yield_k.x.array > 0)[:10])
+        # print(self.yield_diff.x.array[:10])
+        print((self.yield_k.x.array > 0).mean())
+        # print((self.yield_diff.x.array > 0).mean())
 
         # input("press enter")
 
