@@ -442,10 +442,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
     def acceleration(self, u_next, u_k, v_k, a_k):
         return (1 / self.beta) * ((self.beta - 0.5) * a_k + (1 / self.dt**2) * (u_next - u_k - self.dt * v_k))
 
-    def get_problem_equations(self, u_next, u_k, v_k, a_k, f, sigma_func=None, **sigma_kwargs) -> tuple:
-        if sigma_func is None:
-            sigma_func = self.sigma_elastic
-
+    def get_problem_equations(self, u_next, u_k, v_k, a_k, f, sigma_func, **sigma_kwargs) -> tuple:
         V = u_next.function_space
         v = TestFunction(V)
         dx_ = Measure("dx", domain=V.mesh)
@@ -459,7 +456,7 @@ class StructuralElasticSimulation(FenicsxSimulation):
 
         return u_next, a - L, self.get_dirichlet_bcs(V)
 
-    def get_traction_equations(self, u_t_next, a_t_next, f_interface, ds_t, interface_marker_t, sigma_func=None, **sigma_kwargs) -> tuple:
+    def get_traction_equations(self, u_t_next, a_t_next, f_interface, ds_t, interface_marker_t, sigma_func, **sigma_kwargs) -> tuple:
         V_t = u_t_next.function_space
         v_t = TestFunction(V_t)
 
@@ -519,12 +516,12 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         self.zero_alpha = Function(self.W)
         self.zero_alpha.x.array[:] = 0.0
 
-        self.Z = functionspace(self.mesh, self.element_type_sigma)
-        self.yield_trial = TrialFunction(self.Z)
-        self.yield_k = Function(self.Z)
-        self.yield_k.x.array[:] = 0.0
-        self.yield_diff = Function(self.Z)
-        self.z = TestFunction(self.Z)
+        # self.Z = functionspace(self.mesh, self.element_type_sigma)
+        # self.yield_trial = TrialFunction(self.Z)
+        # self.yield_k = Function(self.Z)
+        # self.yield_k.x.array[:] = 0.0
+        # self.yield_diff = Function(self.Z)
+        # self.z = TestFunction(self.Z)
 
         self.alpha_k = Function(self.W)
         self.alpha_k.x.array[:] = 0.0
@@ -564,6 +561,9 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
 
         self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next, self.alpha_n_plus_one(self.u_next, self.alpha_k)))
 
+        self.sigma_test = Function(self.W)
+        self.sigma_problem = self.get_linear_problem(*self.get_projection_equations(self.sigma_test, self.sigma_plastic(self.u_next, self.alpha_k)))
+
         # self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
 
         # self.yield_condition_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_condition(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
@@ -580,6 +580,9 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         # self.yield_k.x.array[:] = self.yield_problem.solve().x.array.copy()
 
         self.alpha_problem.solve()
+        self.sigma_problem.solve()
+
+        print(self.sigma_test.x.array)
 
         print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
 

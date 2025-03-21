@@ -3,7 +3,7 @@ from typing import Literal
 
 from mpi4py import MPI
 from dolfinx.mesh import create_rectangle, CellType, meshtags, locate_entities
-from ufl import TrialFunction, Measure
+from ufl import Measure
 from dolfinx.fem import Function, functionspace
 
 from shared.fenicsx_sims import FenicsxSimulation, StructuralElasticSimulation, StructuralPlasticSimulation
@@ -118,8 +118,6 @@ class _TCTSimulationTractions(_TCTSimulation):
         super()._preprocess()
 
         # Full simulation
-        self.add_dirichlet_bc(self.top_boundary, 2222)
-
         self.bottom_half_nodes = self.get_nodes(self.bottom_half_p)
         self.bottom_half_dofs = self.get_dofs(self.bottom_half_nodes)
 
@@ -133,7 +131,6 @@ class _TCTSimulationTractions(_TCTSimulation):
         self.bottom_half_dofs_t = self.get_dofs(self.bottom_half_nodes_t)
 
         self.interface_marker_t = 88
-        self.not_interface_marker_t = 99
 
         facet_indices, facet_markers = [], []
 
@@ -155,7 +152,7 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        self.traction_problem = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.a_t_next, self.f_res, self.ds_t, self.interface_marker_t))
+        self.traction_problem = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.a_t_next, self.f_res, self.ds_t, self.interface_marker_t, self.sigma_elastic))
 
     def calculate_interface_tractions(self) -> None:
         self.u_t_next.x.array[self.bottom_half_dofs_t] = self.u_next.x.array[self.bottom_half_dofs].copy()
@@ -186,13 +183,11 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
     def _init_variables(self):
         super()._init_variables()
 
-        self.f_interface = TrialFunction(self.V_t)
-        self.u_t = Function(self.V_t)
-        self.u_t_prev = Function(self.V_t)
         self.u_t_next = Function(self.V_t)
+        self.a_t_next = Function(self.V_t)
         self.f_res = Function(self.V_t)
 
-        self.alpha_k_t = Function(self.W_t)
+        self.alpha_t_k = Function(self.W_t)
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -213,7 +208,6 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
         self.bottom_half_dofs_t = self.get_dofs(self.bottom_half_nodes_t)
 
         self.interface_marker_t = 88
-        self.not_interface_marker_t = 99
 
         facet_indices, facet_markers = [], []
 
@@ -235,20 +229,16 @@ class _TCTSimulationTractionsPlastic(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        self.problem_t = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.u_t, self.u_t_prev, self.f_interface, self.ds_t, self.interface_marker_t, self.sigma_plastic, alpha=self.alpha_k_t))
+        self.traction_problem = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.a_t_next, self.f_res, self.ds_t, self.interface_marker_t, self.sigma_plastic, alpha=self.alpha_t_k))
 
     def calculate_interface_tractions(self) -> None:
-        self.alpha_k_t.x.array[self.bottom_half_elements_sigma_t] = self.alpha_k.x.array[self.bottom_half_elements_sigma].copy()
+        self.alpha_t_k.x.array[self.bottom_half_elements_sigma_t] = self.alpha_k.x.array[self.bottom_half_elements_sigma].copy()
         self.u_t_next.x.array[self.bottom_half_dofs_t] = self.u_next.x.array[self.bottom_half_dofs].copy()
+        self.a_t_next.x.array[self.bottom_half_dofs_t] = self.a_next.x.array[self.bottom_half_dofs].copy()
 
-        self.f_res = self.problem_t.solve()
+        self.traction_problem.solve()
 
         return self.f_res.x.array[self.interface_dofs_t].copy()
-
-    def _update_prev_values(self) -> None:
-        super()._update_prev_values()
-        self.u_t_prev.x.array[:] = self.u_t.x.array[:]
-        self.u_t.x.array[:] = self.u_t_next.x.array[:]
 
 
 class TCTElastic(_TCTSimulation, StructuralElasticSimulation):

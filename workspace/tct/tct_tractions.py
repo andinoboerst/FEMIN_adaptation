@@ -7,7 +7,7 @@ from shared.tct import get_TCT_class, get_TCT_class_tractions
 DEFORMATION = "plastic"  # or plastic
 
 
-class TCTExtractTractions(get_TCT_class(DEFORMATION)):
+class TCTExtractTractions(get_TCT_class_tractions(DEFORMATION)):
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -20,7 +20,7 @@ class TCTExtractTractions(get_TCT_class(DEFORMATION)):
 
         self.solve_u()
 
-        # self.data_out[self.step, :] = self.calculate_interface_tractions()
+        self.data_out[self.step, :] = self.calculate_interface_tractions()
 
 
 class TCTApplyTractions(get_TCT_class(DEFORMATION)):
