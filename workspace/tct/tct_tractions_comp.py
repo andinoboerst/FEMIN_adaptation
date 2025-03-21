@@ -4,7 +4,7 @@ from tct.tct_tractions import TCTExtractTractions
 from shared.tct import get_TCT_class
 
 
-DEFORMATION = "plastic"  # or plastic
+DEFORMATION = "elastic"  # or plastic
 
 
 class TCTApplyFixedTractions(get_TCT_class(DEFORMATION)):

@@ -10,7 +10,7 @@ from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem, NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, sqrt, conditional, sym, gt, eq, And, dx
+from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, sqrt, conditional, sym, gt, eq, And, dx, replace, lhs, rhs
 from petsc4py import PETSc
 
 from shared.plotting import format_vectors_from_flat, create_mesh_animation
@@ -218,31 +218,41 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         neumann = self._neumann_bcs[marker]
         neumann[0].x.array[neumann[1]] = values
 
-    def get_projection_equations(self, u_result, V_proj=None) -> tuple:
-        if V_proj is None:
-            try:
-                V_proj = u_result.function_space
-            except AttributeError:
-                raise ValueError("V_proj is None and u_result is not a Function")
+    def get_projection_equations(self, u_projected, u_result) -> tuple:
+        V_proj = u_projected.function_space
 
         v = TestFunction(V_proj)
-        u_proj = TrialFunction(V_proj)
+        du = TrialFunction(V_proj)
 
         dx_ = Measure("dx", domain=V_proj.mesh)
 
-        a = inner(u_proj, v) * dx_
+        a = inner(du, v) * dx_
         L = inner(u_result, v) * dx_
 
-        return a, L
+        return u_projected, a - L
 
-    def get_linear_problem(self, a, L, bcs=[]):
+    def get_linear_problem(self, u, residual, bcs=[]):
+        V = u.function_space
+        du = TrialFunction(V)
+        Residual_du = replace(residual, {u: du})
+        a_form = lhs(Residual_du)
+        L_form = rhs(Residual_du)
+
         problem = LinearProblem(
-            a,
-            L,
+            a_form,
+            L_form,
             bcs=bcs,
             petsc_options=self.linear_petsc_options,
         )
-        return problem
+
+        class LinearSolver:
+            def __init__(self, u, problem) -> None:
+                self.u = u
+                self.problem = problem
+
+            def solve(self):
+                self.u.x.array[:] = self.problem.solve().x.array[:]
+        return LinearSolver(u, problem)
 
     def get_nonlinear_problem(self, u, residual, bcs=[]):
         problem = NonlinearProblem(
@@ -300,13 +310,15 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             nodal_func_space = functionspace(var_func_space.mesh, ("CG", 1, (2,)))
 
             res_variable = Function(var_func_space)
+            proj_variable = Function(nodal_func_space)
 
-            problem = self.get_linear_problem(*self.get_projection_equations(res_variable, nodal_func_space))
+            problem = self.get_linear_problem(*self.get_projection_equations(proj_variable, res_variable))
 
             new_res = []
             for entry in res:
                 res_variable.x.array[:] = entry
-                new_res.append(problem.solve().x.array.copy())
+                problem.solve()
+                new_res.append(proj_variable.x.array.copy())
 
             self.plot_results[key] = new_res
 
@@ -367,112 +379,15 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         create_mesh_animation(plot_mesh, scalar_value, variables.get(vector_variable), name=name)
 
 
-class StructuralElasticSimulationOG(FenicsxSimulation):
-
-    E = 200.0e3
-    nu = 0.3
-    rho = 7.85e-9
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    def _plot_variables(self) -> dict:
-        return {
-            "u": self.u_k,
-        }
-
-    def _solve_time_step(self) -> None:
-        self.solve_u()
-
-    def setup(self) -> None:
-        self.mu = self.E / (2.0 * (1.0 + self.nu))
-        self.lmbda = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        self.rho_dt = self.rho / self.dt**2
-
-        self.G = self.E / (2 * (1 + self.nu))
-        self.C = self.E / 5
-
-        super().setup()
-
-    def _define_functionspace(self) -> None:
-        self.V = functionspace(self.mesh, (*self.element_type, (2,)))
-        self.W = functionspace(self.mesh, (*self.element_type_sigma, (2, 2)))
-
-    def _init_variables(self) -> None:
-        self.u = TrialFunction(self.V)
-        self.f = Constant(self.mesh, np.array([0.0, 0.0]))  # Force term
-
-        self.u_k = Function(self.V, name="Displacement")
-        self.u_prev = Function(self.V)
-        self.u_next = Function(self.V)
-
-        # Initialize displacement and acceleration to zero
-        self.u_k.x.array[:] = 0.0
-        self.u_prev.x.array[:] = 0.0
-
-    @staticmethod
-    def epsilon(u):
-        return sym(grad(u))
-
-    def sigma_elastic(self, u):
-        epsilon = self.epsilon(u)
-        return self.lmbda * tr(epsilon) * Identity(self.dim) + 2 * self.mu * epsilon
-
-    def get_problem_equations(self, u, u_k, u_prev, f, sigma_func=None, **sigma_kwargs) -> tuple:
-        if sigma_func is None:
-            sigma_func = self.sigma_elastic
-
-        V = u_k.function_space
-        v = TestFunction(V)
-
-        dx_ = Measure("dx", domain=V.mesh)
-        stiffness_term = inner(sigma_func(u, **sigma_kwargs), self.epsilon(v)) * dx_
-        mass_term = self.rho_dt * inner(u, v) * dx_
-        a = mass_term + stiffness_term
-
-        L_body = dot(f, v) * dx_
-        L_mass = self.rho_dt * inner((2 * u_k - u_prev), v) * dx_
-        L = self.apply_neumann_bcs(L_body + L_mass, V)
-
-        return a, L, self.get_dirichlet_bcs(V)
-
-    def get_traction_equations(self, u_t_next, u_t, u_t_prev, f_interface, ds_t, interface_marker_t, sigma_func=None, **sigma_kwargs) -> tuple:
-        if sigma_func is None:
-            sigma_func = self.sigma_elastic
-
-        V_t = u_t_next.function_space
-        v_t = TestFunction(V_t)
-
-        dx_t = Measure("dx", domain=V_t.mesh)
-
-        a_t = dot(f_interface, v_t) * ds_t(interface_marker_t) + dot(f_interface, v_t) * dx_t - dot(f_interface, v_t) * dx_t
-        L_t = self.apply_neumann_bcs(inner(sigma_func(u_t_next, **sigma_kwargs), self.epsilon(v_t)) * dx_t + self.rho_dt * inner((u_t_next - 2 * u_t + u_t_prev), v_t) * dx_t, V_t)
-
-        return a_t, L_t, self.get_dirichlet_bcs(V_t)
-
-    def _define_differential_equations(self):
-
-        self.elastic_problem = self.get_linear_problem(*self.get_problem_equations(self.u, self.u_k, self.u_prev, self.f))
-
-    def _update_prev_values(self) -> None:
-        self.u_prev.x.array[:] = self.u_k.x.array[:]
-        self.u_k.x.array[:] = self.u_next.x.array[:]
-
-    def solve_u(self) -> None:
-        self.u_next = self.elastic_problem.solve()
-
-    def solve_time_step(self) -> None:
-        super().solve_time_step()
-
-        self._update_prev_values()
-
-
 class StructuralElasticSimulation(FenicsxSimulation):
 
     E = 200.0e3
     nu = 0.3
     rho = 7.85e-9
 
+    beta = 0.5
+    gamma = 1
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -487,7 +402,6 @@ class StructuralElasticSimulation(FenicsxSimulation):
     def setup(self) -> None:
         self.mu = self.E / (2.0 * (1.0 + self.nu))
         self.lmbda = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        self.rho_dt = self.rho / self.dt**2
 
         self.G = self.E / (2 * (1 + self.nu))
         self.C = self.E / 5
@@ -499,16 +413,20 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self.W = functionspace(self.mesh, (*self.element_type_sigma, (2, 2)))
 
     def _init_variables(self) -> None:
-        self.u = TrialFunction(self.V)
         self.f = Constant(self.mesh, np.array([0.0, 0.0]))  # Force term
 
         self.u_k = Function(self.V, name="Displacement")
-        self.u_prev = Function(self.V)
-        self.u_next = Function(self.V)
+        self.v_k = Function(self.V, name="Velocity")
+        self.a_k = Function(self.V, name="Acceleration")
 
-        # Initialize displacement and acceleration to zero
+        self.u_next = Function(self.V)
+        self.v_next = Function(self.V)
+        self.a_next = Function(self.V)
+
+        # Initialize variables to zero
         self.u_k.x.array[:] = 0.0
-        self.u_prev.x.array[:] = 0.0
+        self.v_k.x.array[:] = 0.0
+        self.a_k.x.array[:] = 0.0
 
     @staticmethod
     def epsilon(u):
@@ -518,48 +436,71 @@ class StructuralElasticSimulation(FenicsxSimulation):
         epsilon = self.epsilon(u)
         return self.lmbda * tr(epsilon) * Identity(self.dim) + 2 * self.mu * epsilon
 
-    def get_problem_equations(self, u, u_k, u_prev, f, sigma_func=None, **sigma_kwargs) -> tuple:
+    def velocity(self, a_next, v_k, a_k):
+        return v_k + (1 - self.gamma) * self.dt * a_k + self.gamma * self.dt * a_next
+
+    def acceleration(self, u_next, u_k, v_k, a_k):
+        return (1 / self.beta) * ((self.beta - 0.5) * a_k + (1 / self.dt**2) * (u_next - u_k - self.dt * v_k))
+
+    def get_problem_equations(self, u_next, u_k, v_k, a_k, f, sigma_func=None, **sigma_kwargs) -> tuple:
         if sigma_func is None:
             sigma_func = self.sigma_elastic
 
-        V = u_k.function_space
+        V = u_next.function_space
         v = TestFunction(V)
-
         dx_ = Measure("dx", domain=V.mesh)
-        stiffness_term = inner(sigma_func(u, **sigma_kwargs), self.epsilon(v)) * dx_
-        mass_term = self.rho_dt * inner(u, v) * dx_
+
+        stiffness_term = inner(sigma_func(u_next, **sigma_kwargs), self.epsilon(v)) * dx_
+        mass_term = self.rho * inner(self.acceleration(u_next, u_k, v_k, a_k), v) * dx_
         a = mass_term + stiffness_term
 
         L_body = dot(f, v) * dx_
-        L_mass = self.rho_dt * inner((2 * u_k - u_prev), v) * dx_
-        L = self.apply_neumann_bcs(L_body + L_mass, V)
+        L = self.apply_neumann_bcs(L_body, V)
 
-        return a, L, self.get_dirichlet_bcs(V)
+        return u_next, a - L, self.get_dirichlet_bcs(V)
 
-    def get_traction_equations(self, u_t_next, u_t, u_t_prev, f_interface, ds_t, interface_marker_t, sigma_func=None, **sigma_kwargs) -> tuple:
-        if sigma_func is None:
-            sigma_func = self.sigma_elastic
-
+    def get_traction_equations(self, u_t_next, a_t_next, f_interface, ds_t, interface_marker_t, sigma_func=None, **sigma_kwargs) -> tuple:
         V_t = u_t_next.function_space
         v_t = TestFunction(V_t)
 
         dx_t = Measure("dx", domain=V_t.mesh)
 
         a_t = dot(f_interface, v_t) * ds_t(interface_marker_t) + dot(f_interface, v_t) * dx_t - dot(f_interface, v_t) * dx_t
-        L_t = self.apply_neumann_bcs(inner(sigma_func(u_t_next, **sigma_kwargs), self.epsilon(v_t)) * dx_t + self.rho_dt * inner((u_t_next - 2 * u_t + u_t_prev), v_t) * dx_t, V_t)
+        L_t = self.apply_neumann_bcs(inner(sigma_func(u_t_next, **sigma_kwargs), self.epsilon(v_t)) * dx_t + self.rho * inner(a_t_next, v_t) * dx_t, V_t)
 
-        return a_t, L_t, self.get_dirichlet_bcs(V_t)
+        return f_interface, a_t - L_t, self.get_dirichlet_bcs(V_t)
+
+    def get_main_problems(self, u_next, v_next, a_next, u_k, v_k, a_k, f, constitutive_model: str = "elastic", **sigma_kwargs):
+
+        if constitutive_model == "elastic":
+            sigma_func = self.sigma_elastic
+            get_problem_func = self.get_linear_problem
+        elif constitutive_model == "plastic":
+            sigma_func = self.sigma_plastic
+            get_problem_func = self.get_nonlinear_problem
+        else:
+            raise ValueError(f"Unknown constitutive model: {constitutive_model}. (Must be 'elastic' or 'plastic'.)")
+
+        main_problem = get_problem_func(*self.get_problem_equations(u_next, u_k, v_k, a_k, f, sigma_func=sigma_func, **sigma_kwargs))
+
+        acceleration_problem = self.get_linear_problem(*self.get_projection_equations(a_next, self.acceleration(u_next, u_k=u_k, v_k=v_k, a_k=a_k)))
+        velocity_problem = self.get_linear_problem(*self.get_projection_equations(v_next, self.velocity(a_next=a_next, v_k=v_k, a_k=a_k)))
+
+        return main_problem, acceleration_problem, velocity_problem
 
     def _define_differential_equations(self):
-
-        self.elastic_problem = self.get_linear_problem(*self.get_problem_equations(self.u, self.u_k, self.u_prev, self.f))
-
-    def _update_prev_values(self) -> None:
-        self.u_prev.x.array[:] = self.u_k.x.array[:]
-        self.u_k.x.array[:] = self.u_next.x.array[:]
+        self.main_problem, self.acceleration_problem, self.velocity_problem = self.get_main_problems(self.u_next, self.v_next, self.a_next, self.u_k, self.v_k, self.a_k, self.f)
 
     def solve_u(self) -> None:
-        self.u_next = self.elastic_problem.solve()
+        self.main_problem.solve()
+
+        self.acceleration_problem.solve()
+        self.velocity_problem.solve()
+
+    def _update_prev_values(self) -> None:
+        self.u_k.x.array[:] = self.u_next.x.array[:]
+        self.v_k.x.array[:] = self.v_next.x.array[:]
+        self.a_k.x.array[:] = self.a_next.x.array[:]
 
     def solve_time_step(self) -> None:
         super().solve_time_step()
@@ -587,9 +528,7 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
 
         self.alpha_k = Function(self.W)
         self.alpha_k.x.array[:] = 0.0
-        self.alpha_trial = TrialFunction(self.W)
-        self.w = TestFunction(self.W)
-        self.alpha_projected = Function(self.W)
+        self.alpha_next = Function(self.W)
 
     def sigma_dev(self, sigma):
         return sigma - (1 / 3) * tr(sigma) * Identity(self.dim)
@@ -598,10 +537,8 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         return sqrt(3 / 2 * inner(sigma_dev - alpha, sigma_dev - alpha)) - self.sigma_yield
 
     def yield_condition(self, sigma_dev, alpha):
-        # return conditional(gt(self.yield_function(sigma_dev, alpha), self.tol), 1, 0)
-        # return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_k, self.tol)), 1, 0)
-        return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_k)), alpha), self.tol)), 1, 0)
-        # return conditional(gt((self.yield_function(sigma_dev, alpha) - self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_k)), alpha) / 2), self.tol), 1, 0)
+        return conditional(gt(self.yield_function(sigma_dev, alpha), self.tol), 1, 0)
+        # return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_k)), alpha), self.tol)), 1, 0)
 
     def delta_epsilon(self, sigma_dev, alpha):
         norm = sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
@@ -613,7 +550,7 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
     def delta_sigma(self, sigma_dev, alpha):
         return 2 * self.G * self.delta_epsilon(sigma_dev, alpha) + self.lmbda * tr(self.delta_epsilon(sigma_dev, alpha)) * Identity(self.dim)
 
-    def alpha_next(self, u, alpha):
+    def alpha_n_plus_one(self, u, alpha):
         sigma_dev = self.sigma_dev(self.sigma_elastic(u))
         return conditional(eq(self.yield_condition(sigma_dev, alpha), 1), alpha + self.delta_alpha(sigma_dev, alpha), alpha)
 
@@ -623,29 +560,28 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         return conditional(eq(self.yield_condition(sigma_dev_trial, alpha), 1), sigma_trial + self.delta_sigma(sigma_dev_trial, alpha), sigma_trial)
 
     def _define_differential_equations(self):
-        a_sigma, L_sigma, bcs_sigma = self.get_problem_equations(self.u_next, self.u_k, self.u_prev, self.f, sigma_func=self.sigma_plastic, alpha=self.alpha_k)
-        self.plastic_problem = self.get_nonlinear_problem(self.u_next, a_sigma - L_sigma, bcs_sigma)
+        self.main_problem, self.acceleration_problem, self.velocity_problem = self.get_main_problems(self.u_next, self.v_next, self.a_next, self.u_k, self.v_k, self.a_k, self.f, constitutive_model="plastic", alpha=self.alpha_k)
 
-        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next(self.u_next, self.alpha_k), self.W))
+        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next, self.alpha_n_plus_one(self.u_next, self.alpha_k)))
 
-        self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
+        # self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
 
-        self.yield_condition_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_condition(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
+        # self.yield_condition_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_condition(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
 
     def solve_u(self) -> None:
+        super().solve_u()
+
         # yield_next = self.yield_problem.solve().x.array.copy()
 
         # self.yield_diff.x.array[:] = yield_next - self.yield_k.x.array[:]
-
-        n, converged = self.plastic_problem.solve()
 
         # yield_condition = self.yield_condition_problem.solve().x.array.copy()
 
         # self.yield_k.x.array[:] = self.yield_problem.solve().x.array.copy()
 
-        self.alpha_k.x.array[:] = self.alpha_problem.solve().x.array.copy()
+        self.alpha_problem.solve()
 
-        print(f"Solved step {self.step} in {n} iterations, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
+        print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
 
         # print(self.alpha_k.x.array[:40])
         # print(self.yield_k.x.array[:10])
@@ -655,6 +591,11 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         # print((self.yield_diff.x.array > 0).mean())
 
         # input("press enter")
+
+    def _update_prev_values(self):
+        super()._update_prev_values()
+
+        self.alpha_k.x.array[:] = self.alpha_next.x.array[:]
 
     def check_export_results(self) -> bool:
         return self.step % 50 == 0
