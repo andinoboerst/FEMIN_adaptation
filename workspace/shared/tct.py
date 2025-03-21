@@ -25,13 +25,15 @@ class _TCTSimulation(FenicsxSimulation):
 
         self.omega = 2 * np.pi * frequency
 
-    def return_mesh(self, height: float):
-        ny = int(height / self.element_size_y)
+    def return_mesh(self, height: float, corner_point=None):
+        if corner_point is None:
+            corner_point = self.corner_point
+        ny = int((height - corner_point[1]) / self.element_size_y)
 
         mesh = create_rectangle(
             MPI.COMM_WORLD,
             cell_type=CellType.quadrilateral,
-            points=(self.corner_point, (self.width, height)),
+            points=(corner_point, (self.width, height)),
             n=(self.nx, ny)
         )
 
@@ -108,11 +110,8 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _init_variables(self):
         super()._init_variables()
 
-        self.f_interface = TrialFunction(self.V_t)
         self.u_t_next = Function(self.V_t)
-        self.u_t_k = Function(self.V_t)
-        self.v_t_k = Function(self.V_t)
-        self.a_t_k = Function(self.V_t)
+        self.a_t_next = Function(self.V_t)
         self.f_res = Function(self.V_t)
 
     def _preprocess(self) -> None:
@@ -156,15 +155,13 @@ class _TCTSimulationTractions(_TCTSimulation):
     def _define_differential_equations(self):
         super()._define_differential_equations()
 
-        self.problem_t = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.u_t_k, self.v_t_k, self.a_t_k, self.f_interface, self.ds_t, self.interface_marker_t))
+        self.traction_problem = self.get_linear_problem(*self.get_traction_equations(self.u_t_next, self.a_t_next, self.f_res, self.ds_t, self.interface_marker_t))
 
     def calculate_interface_tractions(self) -> None:
         self.u_t_next.x.array[self.bottom_half_dofs_t] = self.u_next.x.array[self.bottom_half_dofs].copy()
-        self.u_t_k.x.array[self.bottom_half_dofs_t] = self.u_k.x.array[self.bottom_half_dofs].copy()
-        self.v_t_k.x.array[self.bottom_half_dofs_t] = self.v_k.x.array[self.bottom_half_dofs].copy()
-        self.a_t_k.x.array[self.bottom_half_dofs_t] = self.a_k.x.array[self.bottom_half_dofs].copy()
+        self.a_t_next.x.array[self.bottom_half_dofs_t] = self.a_next.x.array[self.bottom_half_dofs].copy()
 
-        self.f_res = self.problem_t.solve()
+        self.traction_problem.solve()
 
         return self.f_res.x.array[self.interface_dofs_t].copy()
 
