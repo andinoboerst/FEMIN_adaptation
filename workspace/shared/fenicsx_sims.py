@@ -2,7 +2,6 @@ import abc
 import numpy as np
 import logging
 from functools import partial
-# import dill
 
 from mpi4py import MPI
 from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
@@ -10,7 +9,7 @@ from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem, NonlinearProblem
 from dolfinx.nls.petsc import NewtonSolver
-from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, sqrt, conditional, sym, gt, eq, And, dx, replace, lhs, rhs
+from ufl import TestFunction, TrialFunction, Identity, Measure, grad, inner, dot, tr, sqrt, conditional, sym, gt, eq, And, replace, lhs, rhs
 from petsc4py import PETSc
 
 from shared.plotting import format_vectors_from_flat, create_mesh_animation
@@ -218,7 +217,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         neumann = self._neumann_bcs[marker]
         neumann[0].x.array[neumann[1]] = values
 
-    def get_projection_equations(self, u_projected, u_result) -> tuple:
+    def get_projection_problem(self, u_projected, u_result) -> tuple:
         V_proj = u_projected.function_space
 
         v = TestFunction(V_proj)
@@ -229,7 +228,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         a = inner(du, v) * dx_
         L = inner(u_result, v) * dx_
 
-        return u_projected, a - L
+        return self.get_linear_problem(u_projected, a - L)
 
     def get_linear_problem(self, u, residual, bcs=[]):
         V = u.function_space
@@ -284,12 +283,17 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     def check_export_results(self) -> bool:
         return self.step % 100 == 0
 
+    def _update_prev_values(self) -> None:
+        pass
+
     def solve_time_step(self) -> None:
         self._solve_time_step()
 
         if self.check_export_results():
             for key, res in self._plot_variables().items():
                 self.plot_results[key].append(res.x.array.copy())
+
+        self._update_prev_values()
 
     def advance_time(self) -> None:
         self.time += self.dt
@@ -312,7 +316,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             res_variable = Function(var_func_space)
             proj_variable = Function(nodal_func_space)
 
-            problem = self.get_linear_problem(*self.get_projection_equations(proj_variable, res_variable))
+            problem = self.get_projection_problem(proj_variable, res_variable)
 
             new_res = []
             for entry in res:
@@ -379,25 +383,31 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         create_mesh_animation(plot_mesh, scalar_value, variables.get(vector_variable), name=name)
 
 
-class StructuralElasticSimulation(FenicsxSimulation):
+class StructuralSimulation(FenicsxSimulation):
 
     E = 200.0e3
     nu = 0.3
     rho = 7.85e-9
+    sigma_yield = 250  # Yield stress (MPa)
+
+    tol = 1e-6
 
     beta = 0.5
     gamma = 1
 
+    constitutive_model_options = ["elastic", "plastic"]
+    constitutive_model = "elastic"
+
     def __init__(self) -> None:
         super().__init__()
+
+        if self.constitutive_model not in self.constitutive_model_options:
+            raise ValueError(f"Unknown constitutive model: {self.constitutive_model}. Needs to be one of {self.constitutive_model_options}.")
 
     def _plot_variables(self) -> dict:
         return {
             "u": self.u_k,
         }
-
-    def _solve_time_step(self) -> None:
-        self.solve_u()
 
     def setup(self) -> None:
         self.mu = self.E / (2.0 * (1.0 + self.nu))
@@ -428,6 +438,67 @@ class StructuralElasticSimulation(FenicsxSimulation):
         self.v_k.x.array[:] = 0.0
         self.a_k.x.array[:] = 0.0
 
+        # Plastic variables
+        self.zero_alpha = Function(self.W)
+        self.zero_alpha.x.array[:] = 0.0
+
+        self.alpha_k = Function(self.W)
+        self.alpha_next = Function(self.W)
+        self.alpha_k.x.array[:] = 0.0
+
+    def setup_traction_problem(
+        self,
+        mesh_t,
+        mesh,
+        function_overlapping_points,
+        function_overlapping_elements,
+        interface_function,
+    ) -> None:
+        V = functionspace(mesh, (*self.element_type, (2,)))
+        W = functionspace(mesh, (*self.element_type_sigma, (2, 2)))
+
+        V_t = functionspace(mesh_t, (*self.element_type, (2,)))
+        W_t = functionspace(mesh_t, (*self.element_type_sigma, (2, 2)))
+
+        self.u_t_next = Function(V_t)
+        self.a_t_next = Function(V_t)
+        self.f_res = Function(V_t)
+        self.alpha_t_k = Function(W_t)
+
+        # Full simulation
+        self.overlapping_nodes = self.get_nodes(function_overlapping_points, V=V)
+        self.overlapping_elements_sigma = self.get_dofs(self.get_nodes(function_overlapping_elements, V=W), value_dim=2)
+        self.overlapping_dofs = self.get_dofs(self.overlapping_nodes)
+
+        # Traction extraction
+        self.overlapping_nodes_t = self.get_nodes(function_overlapping_points, V=V_t)
+        self.overlapping_elements_sigma_t = self.get_dofs(self.get_nodes(function_overlapping_elements, V=W_t), value_dim=2)
+        self.overlapping_dofs_t = self.get_dofs(self.overlapping_nodes_t)
+
+        interface_nodes_t = self.get_nodes(interface_function, V=V_t)
+        self.interface_dofs_t = self.get_dofs(interface_nodes_t)
+
+        interface_marker_t = 88
+
+        facet_indices, facet_markers = [], []
+
+        fdim = mesh_t.topology.dim - 1
+
+        facets = locate_entities(mesh_t, fdim, interface_function)
+        facet_indices.append(facets)
+        facet_markers.append(np.full_like(facets, interface_marker_t))
+
+        facet_indices = np.hstack(facet_indices).astype(np.int32)
+        facet_markers = np.hstack(facet_markers).astype(np.int32)
+        sorted_facets = np.argsort(facet_indices)
+        facet_tag = meshtags(mesh_t, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
+
+        self.ds_t = Measure("ds", domain=mesh_t, subdomain_data=facet_tag)(interface_marker_t)
+
+        self.add_dirichlet_bc(lambda x: ~interface_function(x), 1234, V_t)
+
+        return self.u_t_next, self.a_t_next, self.f_res, self.ds_t, self.constitutive_model, self.alpha_t_k
+
     @staticmethod
     def epsilon(u):
         return sym(grad(u))
@@ -435,97 +506,6 @@ class StructuralElasticSimulation(FenicsxSimulation):
     def sigma_elastic(self, u):
         epsilon = self.epsilon(u)
         return self.lmbda * tr(epsilon) * Identity(self.dim) + 2 * self.mu * epsilon
-
-    def velocity(self, a_next, v_k, a_k):
-        return v_k + (1 - self.gamma) * self.dt * a_k + self.gamma * self.dt * a_next
-
-    def acceleration(self, u_next, u_k, v_k, a_k):
-        return (1 / self.beta) * ((self.beta - 0.5) * a_k + (1 / self.dt**2) * (u_next - u_k - self.dt * v_k))
-
-    def get_problem_equations(self, u_next, u_k, v_k, a_k, f, sigma_func, **sigma_kwargs) -> tuple:
-        V = u_next.function_space
-        v = TestFunction(V)
-        dx_ = Measure("dx", domain=V.mesh)
-
-        stiffness_term = inner(sigma_func(u_next, **sigma_kwargs), self.epsilon(v)) * dx_
-        mass_term = self.rho * inner(self.acceleration(u_next, u_k, v_k, a_k), v) * dx_
-        a = mass_term + stiffness_term
-
-        L_body = dot(f, v) * dx_
-        L = self.apply_neumann_bcs(L_body, V)
-
-        return u_next, a - L, self.get_dirichlet_bcs(V)
-
-    def get_traction_equations(self, u_t_next, a_t_next, f_interface, ds_t, interface_marker_t, sigma_func, **sigma_kwargs) -> tuple:
-        V_t = u_t_next.function_space
-        v_t = TestFunction(V_t)
-
-        dx_t = Measure("dx", domain=V_t.mesh)
-
-        a_t = dot(f_interface, v_t) * ds_t(interface_marker_t) + dot(f_interface, v_t) * dx_t - dot(f_interface, v_t) * dx_t
-        L_t = self.apply_neumann_bcs(inner(sigma_func(u_t_next, **sigma_kwargs), self.epsilon(v_t)) * dx_t + self.rho * inner(a_t_next, v_t) * dx_t, V_t)
-
-        return f_interface, a_t - L_t, self.get_dirichlet_bcs(V_t)
-
-    def get_main_problems(self, u_next, v_next, a_next, u_k, v_k, a_k, f, constitutive_model: str = "elastic", **sigma_kwargs):
-
-        if constitutive_model == "elastic":
-            sigma_func = self.sigma_elastic
-            get_problem_func = self.get_linear_problem
-        elif constitutive_model == "plastic":
-            sigma_func = self.sigma_plastic
-            get_problem_func = self.get_nonlinear_problem
-        else:
-            raise ValueError(f"Unknown constitutive model: {constitutive_model}. (Must be 'elastic' or 'plastic'.)")
-
-        main_problem = get_problem_func(*self.get_problem_equations(u_next, u_k, v_k, a_k, f, sigma_func=sigma_func, **sigma_kwargs))
-
-        acceleration_problem = self.get_linear_problem(*self.get_projection_equations(a_next, self.acceleration(u_next, u_k=u_k, v_k=v_k, a_k=a_k)))
-        velocity_problem = self.get_linear_problem(*self.get_projection_equations(v_next, self.velocity(a_next=a_next, v_k=v_k, a_k=a_k)))
-
-        return main_problem, acceleration_problem, velocity_problem
-
-    def _define_differential_equations(self):
-        self.main_problem, self.acceleration_problem, self.velocity_problem = self.get_main_problems(self.u_next, self.v_next, self.a_next, self.u_k, self.v_k, self.a_k, self.f)
-
-    def solve_u(self) -> None:
-        self.main_problem.solve()
-
-        self.acceleration_problem.solve()
-        self.velocity_problem.solve()
-
-    def _update_prev_values(self) -> None:
-        self.u_k.x.array[:] = self.u_next.x.array[:]
-        self.v_k.x.array[:] = self.v_next.x.array[:]
-        self.a_k.x.array[:] = self.a_next.x.array[:]
-
-    def solve_time_step(self) -> None:
-        super().solve_time_step()
-
-        self._update_prev_values()
-
-
-class StructuralPlasticSimulation(StructuralElasticSimulation):
-    sigma_yield = 250  # Yield stress (MPa)
-
-    tol = 1e-6
-
-    def _init_variables(self):
-        super()._init_variables()
-
-        self.zero_alpha = Function(self.W)
-        self.zero_alpha.x.array[:] = 0.0
-
-        # self.Z = functionspace(self.mesh, self.element_type_sigma)
-        # self.yield_trial = TrialFunction(self.Z)
-        # self.yield_k = Function(self.Z)
-        # self.yield_k.x.array[:] = 0.0
-        # self.yield_diff = Function(self.Z)
-        # self.z = TestFunction(self.Z)
-
-        self.alpha_k = Function(self.W)
-        self.alpha_k.x.array[:] = 0.0
-        self.alpha_next = Function(self.W)
 
     def sigma_dev(self, sigma):
         return sigma - (1 / 3) * tr(sigma) * Identity(self.dim)
@@ -556,170 +536,95 @@ class StructuralPlasticSimulation(StructuralElasticSimulation):
         sigma_dev_trial = self.sigma_dev(sigma_trial)
         return conditional(eq(self.yield_condition(sigma_dev_trial, alpha), 1), sigma_trial + self.delta_sigma(sigma_dev_trial, alpha), sigma_trial)
 
+    def velocity(self, a_next, v_k, a_k):
+        return v_k + (1 - self.gamma) * self.dt * a_k + self.gamma * self.dt * a_next
+
+    def acceleration(self, u_next, u_k, v_k, a_k):
+        return (1 / self.beta) * ((self.beta - 0.5) * a_k + (1 / self.dt**2) * (u_next - u_k - self.dt * v_k))
+
+    def get_constitutive_functions(self, constitutive_model, alpha_k) -> tuple:
+        if constitutive_model == "elastic":
+            sigma_func = self.sigma_elastic
+            get_problem_func = self.get_linear_problem
+            sigma_kwargs = {}
+        elif constitutive_model == "plastic":
+            if alpha_k is None:
+                raise ValueError("alpha_k must be provided for plastic consitutive model.")
+            sigma_func = self.sigma_plastic
+            get_problem_func = self.get_nonlinear_problem
+            sigma_kwargs = {"alpha": alpha_k}
+
+        return sigma_func, get_problem_func, sigma_kwargs
+
+    def get_problem_equations(self, u_next, u_k, v_k, a_k, f, sigma_func, **sigma_kwargs) -> tuple:
+        V = u_next.function_space
+        v = TestFunction(V)
+        dx_ = Measure("dx", domain=V.mesh)
+
+        stiffness_term = inner(sigma_func(u_next, **sigma_kwargs), self.epsilon(v)) * dx_
+        mass_term = self.rho * inner(self.acceleration(u_next, u_k, v_k, a_k), v) * dx_
+        a = mass_term + stiffness_term
+
+        L_body = dot(f, v) * dx_
+        L = self.apply_neumann_bcs(L_body, V)
+
+        return u_next, a - L, self.get_dirichlet_bcs(V)
+
+    def get_traction_problem(self, u_t_next, a_t_next, f_interface, ds_t, constitutive_model: str = None, alpha_k=None) -> tuple:
+        sigma_func, _, sigma_kwargs = self.get_constitutive_functions(constitutive_model, alpha_k)
+
+        V_t = a_t_next.function_space
+        v_t = TestFunction(V_t)
+
+        dx_t = Measure("dx", domain=V_t.mesh)
+
+        a_t = dot(f_interface, v_t) * ds_t + dot(f_interface, v_t) * dx_t - dot(f_interface, v_t) * dx_t
+        L_t = self.apply_neumann_bcs(inner(sigma_func(u_t_next, **sigma_kwargs), self.epsilon(v_t)) * dx_t + self.rho * inner(a_t_next, v_t) * dx_t, V_t)
+
+        return self.get_linear_problem(f_interface, a_t - L_t, self.get_dirichlet_bcs(V_t))
+
+    def get_main_problems(self, u_next, v_next, a_next, u_k, v_k, a_k, f, constitutive_model: str = None, alpha_k=None, alpha_next=None):
+        if alpha_k is not None and alpha_next is None:
+            raise ValueError("alpha_next must be provided if alpha_k is provided.")
+
+        sigma_func, get_problem_func, sigma_kwargs = self.get_constitutive_functions(constitutive_model, alpha_k)
+
+        u_problem = get_problem_func(*self.get_problem_equations(u_next, u_k, v_k, a_k, f, sigma_func, **sigma_kwargs))
+
+        acceleration_problem = self.get_projection_problem(a_next, self.acceleration(u_next, u_k=u_k, v_k=v_k, a_k=a_k))
+        velocity_problem = self.get_projection_problem(v_next, self.velocity(a_next=a_next, v_k=v_k, a_k=a_k))
+
+        if constitutive_model == "elastic":
+            return u_problem, acceleration_problem, velocity_problem
+        else:
+            alpha_problem = self.get_projection_problem(alpha_next, self.alpha_n_plus_one(u_next, alpha_k))
+            return u_problem, acceleration_problem, velocity_problem, alpha_problem
+
+    def calculate_interface_tractions(self) -> None:
+        self.alpha_t_k.x.array[self.overlapping_elements_sigma_t] = self.alpha_k.x.array[self.overlapping_elements_sigma].copy()
+        self.u_t_next.x.array[self.overlapping_dofs_t] = self.u_next.x.array[self.overlapping_dofs].copy()
+        self.a_t_next.x.array[self.overlapping_dofs_t] = self.a_next.x.array[self.overlapping_dofs].copy()
+
+        self.traction_problem.solve()
+
+        return self.f_res.x.array[self.interface_dofs_t].copy()
+
     def _define_differential_equations(self):
-        self.main_problem, self.acceleration_problem, self.velocity_problem = self.get_main_problems(self.u_next, self.v_next, self.a_next, self.u_k, self.v_k, self.a_k, self.f, constitutive_model="plastic", alpha=self.alpha_k)
-
-        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next, self.alpha_n_plus_one(self.u_next, self.alpha_k)))
-
-        self.sigma_test = Function(self.W)
-        self.sigma_problem = self.get_linear_problem(*self.get_projection_equations(self.sigma_test, self.sigma_plastic(self.u_next, self.alpha_k)))
-
-        # self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
-
-        # self.yield_condition_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_condition(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
+        self.main_problems = self.get_main_problems(self.u_next, self.v_next, self.a_next, self.u_k, self.v_k, self.a_k, self.f, self.constitutive_model, self.alpha_k, self.alpha_next)
 
     def solve_u(self) -> None:
-        super().solve_u()
 
-        # yield_next = self.yield_problem.solve().x.array.copy()
+        for problem in self.main_problems:
+            problem.solve()
 
-        # self.yield_diff.x.array[:] = yield_next - self.yield_k.x.array[:]
+        # print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_next.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_next.x.array):.2f}")
 
-        # yield_condition = self.yield_condition_problem.solve().x.array.copy()
-
-        # self.yield_k.x.array[:] = self.yield_problem.solve().x.array.copy()
-
-        self.alpha_problem.solve()
-        self.sigma_problem.solve()
-
-        print(self.sigma_test.x.array)
-
-        print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
-
-        # print(self.alpha_k.x.array[:40])
-        # print(self.yield_k.x.array[:10])
-        # print(yield_condition[:10])
-        # print(self.yield_diff.x.array[:10])
-        # print((self.yield_k.x.array > 0).mean())
-        # print((self.yield_diff.x.array > 0).mean())
-
-        # input("press enter")
-
-    def _update_prev_values(self):
-        super()._update_prev_values()
+    def _update_prev_values(self) -> None:
+        self.u_k.x.array[:] = self.u_next.x.array[:]
+        self.v_k.x.array[:] = self.v_next.x.array[:]
+        self.a_k.x.array[:] = self.a_next.x.array[:]
 
         self.alpha_k.x.array[:] = self.alpha_next.x.array[:]
 
-    def check_export_results(self) -> bool:
-        return self.step % 50 == 0
-
-
-class StructuralPlasticSimulationTest(StructuralElasticSimulation):
-    sigma_yield = 250  # Yield stress (MPa)
-
-    tol = 1e-6
-
-    def _init_variables(self):
-        super()._init_variables()
-
-        self.v = TestFunction(self.V)
-
-        self.zero_alpha = Function(self.W)
-        self.zero_alpha.x.array[:] = 0.0
-
-        self.u_next_plastic = Function(self.V)
-        self.u_next_plastic.x.array[:] = 0.0
-        self.u_next_elastic = Function(self.V)
-
-        self.u_mixed_trial = TrialFunction(self.V)
-        self.u_mixed_k = Function(self.V)
-
-        self.sigma_mixed = Function(self.W)
-
-        self.u_sigma_plastic = TrialFunction(self.V)
-        self.u_sigma_elastic = TrialFunction(self.V)
-
-        self.Z = functionspace(self.mesh, self.element_type_sigma)
-        self.yield_trial = TrialFunction(self.Z)
-        self.yield_k = Function(self.Z)
-        self.yield_k.x.array[:] = 0.0
-        self.yield_diff = Function(self.Z)
-        self.z = TestFunction(self.Z)
-
-        self.alpha_k = Function(self.W)
-        self.alpha_k.x.array[:] = 0.0
-        self.alpha_trial = TrialFunction(self.W)
-        self.w = TestFunction(self.W)
-        self.alpha_projected = Function(self.W)
-
-    def sigma_dev(self, sigma):
-        return sigma - (1 / 3) * tr(sigma) * Identity(self.dim)
-
-    def yield_function(self, sigma_dev, alpha):
-        return sqrt(3 / 2 * inner(sigma_dev - alpha, sigma_dev - alpha)) - self.sigma_yield
-
-    def yield_condition(self, sigma_dev, alpha):
-        # return conditional(gt(self.yield_function(sigma_dev, alpha), self.tol), 1, 0)
-        return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_k, self.tol)), 1, 0)
-
-    def delta_epsilon(self, sigma_dev, alpha):
-        norm = sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
-        return conditional(gt(norm, self.tol), (3 / 2) * self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / norm, self.zero_alpha)
-
-    def delta_alpha(self, sigma_dev, alpha):
-        return (2 / 3) * self.C * self.delta_epsilon(sigma_dev, alpha)
-
-    def delta_sigma(self, sigma_dev, alpha):
-        return 2 * self.G * self.delta_epsilon(sigma_dev, alpha) + self.lmbda * tr(self.delta_epsilon(sigma_dev, alpha)) * Identity(self.dim)
-
-    def alpha_next(self, u, alpha):
-        sigma_dev = self.sigma_dev(self.sigma_elastic(u))
-        return alpha + self.delta_alpha(sigma_dev, alpha)
-
-    def sigma_plastic(self, u, alpha):
-        sigma_trial = self.sigma_elastic(u)
-        sigma_dev_trial = self.sigma_dev(sigma_trial)
-        return sigma_trial + self.delta_sigma(sigma_dev_trial, alpha)
-
-    def _define_differential_equations(self):
-        a_plastic, L_plastic, bcs_plastic = self.get_problem_equations(self.u_next_plastic, self.u_k, self.u_prev, self.f, sigma_func=self.sigma_plastic, alpha=self.alpha_k)
-        self.plastic_problem = self.get_nonlinear_problem(self.u_next_plastic, a_plastic - L_plastic, bcs_plastic)
-
-        a_elastic, L_elastic, bcs_elastic = self.get_problem_equations(self.u, self.u_k, self.u_prev, self.f, sigma_func=self.sigma_elastic)
-        self.elastic_problem = self.get_linear_problem(a_elastic, L_elastic, bcs_elastic)
-
-        self.sigma_plastic_problem = self.get_linear_problem(*self.get_projection_equations(self.sigma_plastic(self.u_next_plastic, self.alpha_k), self.W))
-        self.sigma_elastic_problem = self.get_linear_problem(*self.get_projection_equations(self.sigma_elastic(self.u_next_elastic), self.W))
-
-        a_u_problem = self.rho_dt * inner(self.u_mixed_trial, self.v) * dx
-        b_u_problem = dot(self.f, self.v) * dx + self.rho_dt * inner((2 * self.u_k - self.u_prev), self.v) * dx - inner(self.sigma_mixed, self.epsilon(self.v)) * dx
-        self.u_problem = self.get_linear_problem(a_u_problem, b_u_problem, self.get_dirichlet_bcs(self.V))
-
-        self.alpha_problem = self.get_linear_problem(*self.get_projection_equations(self.alpha_next(self.u_k, self.alpha_k), self.W))
-
-        self.yield_problem = self.get_linear_problem(*self.get_projection_equations(self.yield_condition(self.sigma_dev(self.sigma_elastic(self.u_next)), self.alpha_k), self.Z))
-
-    def solve_u(self) -> None:
-        # yield_next = self.yield_problem.solve().x.array.copy()
-
-        # self.yield_diff.x.array[:] = yield_next - self.yield_k.x.array[:]
-
-        print(self.alpha_k.x.array[:40])
-
-        self.yield_k.x.array[:] = self.yield_problem.solve().x.array.copy()
-        yielded_dofs = np.concatenate(np.dstack((self.yield_k.x.array[:], self.yield_k.x.array[:], self.yield_k.x.array[:], self.yield_k.x.array[:]))[0]).astype(np.int64)
-
-        print(yielded_dofs)
-
-        self.u_next_elastic.x.array[:] = self.elastic_problem.solve().x.array[:]  # solves u_next_elastic
-        self.sigma_mixed.x.array[:] = self.sigma_elastic_problem.solve().x.array[:]
-        if yielded_dofs.sum() > 0:
-            print("updating yield")
-            self.plastic_problem.solve()  # solves u_next_plastic
-            self.alpha_k.x.array[yielded_dofs] = self.alpha_problem.solve().x.array[yielded_dofs]
-            self.sigma_mixed.x.array[yielded_dofs] = self.sigma_plastic_problem.solve().x.array[yielded_dofs]
-
-        self.u_next.x.array[:] = self.u_problem.solve().x.array[:]
-
-        print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_k.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_k.x.array):.2f}")
-
-        print(self.alpha_k.x.array[:40])
-        print((self.yield_k.x.array > 0)[:10])
-        # print(self.yield_diff.x.array[:10])
-        print((self.yield_k.x.array > 0).mean())
-        # print((self.yield_diff.x.array > 0).mean())
-
-        # input("press enter")
-
-    def check_export_results(self) -> bool:
-        return self.step % 50 == 0
+    def _solve_time_step(self) -> None:
+        self.solve_u()
