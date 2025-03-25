@@ -2,7 +2,7 @@ import numpy as np
 from typing import Literal
 
 from mpi4py import MPI
-from dolfinx.mesh import create_rectangle, CellType
+from dolfinx.mesh import create_rectangle, CellType, create_submesh, locate_entities
 
 from shared.fenicsx_sims import StructuralSimulation
 
@@ -44,13 +44,14 @@ class TCTSimulation(StructuralSimulation):
         self.mesh = self.return_mesh(self.height)
 
         if self.height > 25.0:
-            self.mesh_t = self.return_mesh(self.height, corner_point=(0.0, 25.0))
             self.overlapping_func_p = self.top_half_p
             self.overlapping_func_e = self.top_half_e
         else:
-            self.mesh_t = self.return_mesh(25.0)
             self.overlapping_func_p = self.bottom_half_p
             self.overlapping_func_e = self.bottom_half_e
+
+        subdomain_cells = locate_entities(self.mesh, self.mesh.topology.dim, self.overlapping_func_p)
+        self.mesh_t = create_submesh(self.mesh, self.mesh.topology.dim, subdomain_cells)[0]
 
     def _preprocess(self) -> None:
         super()._preprocess()

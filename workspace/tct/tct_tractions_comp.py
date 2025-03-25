@@ -4,13 +4,12 @@ from tct.tct_tractions import TCTExtractTractions
 from shared.tct import TCTSimulation
 
 
-DEFORMATION = "elastic"  # or plastic
+DEFORMATION = "plastic"  # or plastic
 
 
 class TCTApplyFixedTractions(TCTSimulation):
 
     height = 25.0
-    # corner_point = (0.0, 25.0)
 
     def __init__(self, tractions, *args, **kwargs) -> None:
         self.tractions = tractions

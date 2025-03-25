@@ -446,9 +446,6 @@ class StructuralSimulation(FenicsxSimulation):
         self.a_k.x.array[:] = 0.0
 
         # Plastic variables
-        self.zero_alpha = Function(self.W)
-        self.zero_alpha.x.array[:] = 0.0
-
         self.alpha_k = Function(self.W)
         self.alpha_next = Function(self.W)
         self.alpha_k.x.array[:] = 0.0
@@ -528,8 +525,10 @@ class StructuralSimulation(FenicsxSimulation):
         # return conditional(And(gt(self.yield_function(sigma_dev, alpha), self.tol), gt(self.yield_function(sigma_dev, alpha) - self.yield_function(self.sigma_dev(self.sigma_elastic(self.u_k)), alpha), self.tol)), 1, 0)
 
     def delta_epsilon(self, sigma_dev, alpha):
+        zero_alpha = Function(alpha.function_space)
+        zero_alpha.x.array[:] = 0.0
         norm = sqrt(inner(sigma_dev - alpha, sigma_dev - alpha))
-        return conditional(gt(norm, self.tol), (3 / 2) * self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / norm, self.zero_alpha)
+        return conditional(gt(norm, self.tol), (3 / 2) * self.yield_function(sigma_dev, alpha) / (3 * self.G + self.C) * (sigma_dev - alpha) / norm, zero_alpha)
 
     def delta_alpha(self, sigma_dev, alpha):
         return (2 / 3) * self.C * self.delta_epsilon(sigma_dev, alpha)
