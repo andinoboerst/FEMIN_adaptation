@@ -43,7 +43,14 @@ class TCTSimulation(StructuralSimulation):
     def _define_mesh(self) -> None:
         self.mesh = self.return_mesh(self.height)
 
-        self.mesh_t = self.return_mesh(25.0)
+        if self.height > 25.0:
+            self.mesh_t = self.return_mesh(self.height, corner_point=(0.0, 25.0))
+            self.overlapping_func_p = self.top_half_p
+            self.overlapping_func_e = self.top_half_e
+        else:
+            self.mesh_t = self.return_mesh(25.0)
+            self.overlapping_func_p = self.bottom_half_p
+            self.overlapping_func_e = self.bottom_half_e
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -61,10 +68,12 @@ class TCTSimulation(StructuralSimulation):
         self.traction_parameters = self.setup_traction_problem(
             self.mesh_t,
             self.mesh,
-            self.bottom_half_p,
-            self.bottom_half_e,
+            self.overlapping_func_p,
+            self.overlapping_func_e,
             self.interface_boundary,
         )
+
+        self.bottom_half_nodes = self.get_nodes(self.bottom_half_p)
 
     def _define_differential_equations(self) -> None:
         super()._define_differential_equations()
@@ -98,8 +107,12 @@ class TCTSimulation(StructuralSimulation):
         return x[1] < 25.0
 
     @staticmethod
-    def not_interface_boundary(x):
-        return x[1] < 24.6
+    def top_half_p(x):
+        return x[1] > 24.6
+
+    @staticmethod
+    def top_half_e(x):
+        return x[1] > 25.0
 
     def solve_time_step(self) -> None:
         self.update_dirichlet_bc(self.bottom_displacement_function(self.time), self.bottom_boundary_marker)

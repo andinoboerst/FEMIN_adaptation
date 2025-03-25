@@ -1,13 +1,13 @@
 import numpy as np
 import pickle
 
-from shared.tct import get_TCT_class_tractions
+from shared.tct import TCTSimulation
 
 
 DEFORMATION = "elastic"  # or plastic
 
 
-class TCTExtractDisp(get_TCT_class_tractions(DEFORMATION)):
+class TCTExtractDisp(TCTSimulation):
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -16,20 +16,20 @@ class TCTExtractDisp(get_TCT_class_tractions(DEFORMATION)):
         self.data_out = np.zeros((self.num_steps, len(self.interface_dofs)), dtype="float64")
 
     def _solve_time_step(self):
-        self.data_in[self.step, :] = self.calculate_interface_tractions()
+        self.data_in[self.step, :] = - self.calculate_interface_tractions()
 
         self.solve_u()
 
         self.data_out[self.step, :] = self.u_next.x.array[self.interface_dofs]
 
 
-class TCTApplyDisp(get_TCT_class_tractions(DEFORMATION)):
+class TCTApplyDisp(TCTSimulation):
 
     height = 25.0
 
-    def __init__(self, predictor, frequency: int = 1000) -> None:
+    def __init__(self, predictor, *args, **kwargs) -> None:
         self.predictor = predictor
-        super().__init__(frequency)
+        super().__init__(*args, **kwargs)
 
     def _preprocess(self) -> None:
         super()._preprocess()

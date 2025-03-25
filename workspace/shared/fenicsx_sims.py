@@ -46,7 +46,6 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             logger.warning("Simulation has not been set up yet.")
             return []
 
-    # @abc.abstractmethod
     def _preprocess(self) -> None:
         pass
 
@@ -104,7 +103,13 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         if V is None:
             V = self.V
 
-        return locate_dofs_geometrical(V, marker)
+        nodes = locate_dofs_geometrical(V, marker)
+        coords = V.mesh.geometry.x[nodes]
+
+        coords_dtype = coords.dtype
+        dt = [('x', coords_dtype), ('y', coords_dtype), ('z', coords_dtype)]
+        ind = np.argsort(coords.ravel().view(dt), order=['x', 'y', 'z'])
+        return nodes[ind]
 
     def get_dofs(self, nodes, value_dim: int = 1) -> np.array:
         dofs = np.zeros(len(nodes) * self.dim * value_dim, dtype=int)
@@ -390,6 +395,8 @@ class StructuralSimulation(FenicsxSimulation):
     rho = 7.85e-9
     sigma_yield = 250  # Yield stress (MPa)
 
+    body_force = np.array([0.0, 0.0])
+
     tol = 1e-6
 
     beta = 0.5
@@ -423,7 +430,7 @@ class StructuralSimulation(FenicsxSimulation):
         self.W = functionspace(self.mesh, (*self.element_type_sigma, (2, 2)))
 
     def _init_variables(self) -> None:
-        self.f = Constant(self.mesh, np.array([0.0, 0.0]))  # Force term
+        self.f = Constant(self.mesh, self.body_force)  # Force term
 
         self.u_k = Function(self.V, name="Displacement")
         self.v_k = Function(self.V, name="Velocity")
@@ -460,9 +467,12 @@ class StructuralSimulation(FenicsxSimulation):
         V_t = functionspace(mesh_t, (*self.element_type, (2,)))
         W_t = functionspace(mesh_t, (*self.element_type_sigma, (2, 2)))
 
-        self.u_t_next = Function(V_t)
-        self.a_t_next = Function(V_t)
         self.f_res = Function(V_t)
+        self.u_t_next = Function(V_t)
+        self.u_t_k = Function(V_t)
+        self.v_t_k = Function(V_t)
+        self.a_t_k = Function(V_t)
+        self.f_t = Constant(mesh_t, self.body_force)  # Force term
         self.alpha_t_k = Function(W_t)
 
         # Full simulation
@@ -493,11 +503,11 @@ class StructuralSimulation(FenicsxSimulation):
         sorted_facets = np.argsort(facet_indices)
         facet_tag = meshtags(mesh_t, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
 
-        self.ds_t = Measure("ds", domain=mesh_t, subdomain_data=facet_tag)(interface_marker_t)
+        ds_t = Measure("ds", domain=mesh_t, subdomain_data=facet_tag)(interface_marker_t)
 
         self.add_dirichlet_bc(lambda x: ~interface_function(x), 1234, V_t)
 
-        return self.u_t_next, self.a_t_next, self.f_res, self.ds_t, self.constitutive_model, self.alpha_t_k
+        return self.f_res, self.u_t_next, self.u_t_k, self.v_t_k, self.a_t_k, self.f_t, ds_t, self.constitutive_model, self.alpha_t_k
 
     @staticmethod
     def epsilon(u):
@@ -570,18 +580,19 @@ class StructuralSimulation(FenicsxSimulation):
 
         return u_next, a - L, self.get_dirichlet_bcs(V)
 
-    def get_traction_problem(self, u_t_next, a_t_next, f_interface, ds_t, constitutive_model: str = None, alpha_k=None) -> tuple:
+    def get_traction_problem(self, f_interface, u_t_next, u_t_k, v_t_k, a_t_k, f_t, ds_t, constitutive_model: str = None, alpha_k=None) -> tuple:
         sigma_func, _, sigma_kwargs = self.get_constitutive_functions(constitutive_model, alpha_k)
 
-        V_t = a_t_next.function_space
+        V_t = u_t_next.function_space
         v_t = TestFunction(V_t)
 
         dx_t = Measure("dx", domain=V_t.mesh)
 
-        a_t = dot(f_interface, v_t) * ds_t + dot(f_interface, v_t) * dx_t - dot(f_interface, v_t) * dx_t
-        L_t = self.apply_neumann_bcs(inner(sigma_func(u_t_next, **sigma_kwargs), self.epsilon(v_t)) * dx_t + self.rho * inner(a_t_next, v_t) * dx_t, V_t)
+        u_t_next, residual, bcs = self.get_problem_equations(u_t_next, u_t_k, v_t_k, a_t_k, f_t, sigma_func, **sigma_kwargs)
 
-        return self.get_linear_problem(f_interface, a_t - L_t, self.get_dirichlet_bcs(V_t))
+        residual -= dot(f_interface, v_t) * ds_t + dot(f_interface, v_t) * dx_t - dot(f_interface, v_t) * dx_t
+
+        return self.get_linear_problem(f_interface, residual, bcs)
 
     def get_main_problems(self, u_next, v_next, a_next, u_k, v_k, a_k, f, constitutive_model: str = None, alpha_k=None, alpha_next=None):
         if alpha_k is not None and alpha_next is None:
@@ -603,7 +614,9 @@ class StructuralSimulation(FenicsxSimulation):
     def calculate_interface_tractions(self) -> None:
         self.alpha_t_k.x.array[self.overlapping_elements_sigma_t] = self.alpha_k.x.array[self.overlapping_elements_sigma].copy()
         self.u_t_next.x.array[self.overlapping_dofs_t] = self.u_next.x.array[self.overlapping_dofs].copy()
-        self.a_t_next.x.array[self.overlapping_dofs_t] = self.a_next.x.array[self.overlapping_dofs].copy()
+        self.u_t_k.x.array[self.overlapping_dofs_t] = self.u_k.x.array[self.overlapping_dofs].copy()
+        self.v_t_k.x.array[self.overlapping_dofs_t] = self.v_k.x.array[self.overlapping_dofs].copy()
+        self.a_t_k.x.array[self.overlapping_dofs_t] = self.a_k.x.array[self.overlapping_dofs].copy()
 
         self.traction_problem.solve()
 

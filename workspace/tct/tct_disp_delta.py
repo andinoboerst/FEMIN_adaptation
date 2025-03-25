@@ -1,13 +1,13 @@
 import numpy as np
 import pickle
 
-from shared.tct import get_TCT_class_tractions
+from shared.tct import TCTSimulation
 
 
 DEFORMATION = "elastic"  # or plastic
 
 
-class TCTExtractDispDelta(get_TCT_class_tractions(DEFORMATION)):
+class TCTExtractDispDelta(TCTSimulation):
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -28,13 +28,13 @@ class TCTExtractDispDelta(get_TCT_class_tractions(DEFORMATION)):
         self.data_out[self.step, :] = self.u_k.x.array[self.interface_dofs] - self.u_prev.x.array[self.interface_dofs]
 
 
-class TCTApplyDispDelta(get_TCT_class_tractions(DEFORMATION)):
+class TCTApplyDispDelta(TCTSimulation):
 
     height = 25.0
 
-    def __init__(self, predictor, frequency: int = 1000) -> None:
+    def __init__(self, predictor, *args, **kwargs) -> None:
         self.predictor = predictor
-        super().__init__(frequency)
+        super().__init__(*args, **kwargs)
 
     def _preprocess(self) -> None:
         super()._preprocess()
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     with open("results/model_v02.pkl", "rb") as f:
         predictor = pickle.load(f)
 
-    tct = TCTApplyDispDelta(predictor)
+    tct = TCTApplyDispDelta(predictor, constitutive_model=DEFORMATION)
     tct.time_total = 5e-4
     tct.run()
 

@@ -12,6 +12,8 @@ class TCTExtractTractions(TCTSimulation):
     def _preprocess(self) -> None:
         super()._preprocess()
 
+        self.bottom_half_nodes = self.get_nodes(self.bottom_half_p)
+
         self.data_in = np.zeros((self.num_steps, len(self.interface_dofs)))
         self.data_out = np.zeros((self.num_steps, len(self.interface_dofs)))
 
@@ -20,16 +22,16 @@ class TCTExtractTractions(TCTSimulation):
 
         self.solve_u()
 
-        self.data_out[self.step, :] = self.calculate_interface_tractions()
+        self.data_out[self.step, :] = - self.calculate_interface_tractions()
 
 
 class TCTApplyTractions(TCTSimulation):
 
     height = 25.0
 
-    def __init__(self, predictor, frequency: int = 1000) -> None:
+    def __init__(self, predictor, *args, **kwargs) -> None:
         self.predictor = predictor
-        super().__init__(frequency)
+        super().__init__(*args, **kwargs)
 
     def _preprocess(self) -> None:
         super()._preprocess()

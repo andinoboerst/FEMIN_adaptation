@@ -1,25 +1,23 @@
 import numpy as np
-from typing import Literal
 
 from tct.tct_tractions import TCTExtractTractions
 from shared.tct import TCTSimulation
 
 
-DEFORMATION = "plastic"  # or plastic
+DEFORMATION = "elastic"  # or plastic
 
 
 class TCTApplyFixedTractions(TCTSimulation):
 
     height = 25.0
+    # corner_point = (0.0, 25.0)
 
-    def __init__(self, tractions, frequency: int = 1000, constitutive_model: Literal["elastic", "plastic"] = "elastic") -> None:
+    def __init__(self, tractions, *args, **kwargs) -> None:
         self.tractions = tractions
-        super().__init__(frequency, constitutive_model)
+        super().__init__(*args, **kwargs)
 
     def _preprocess(self) -> None:
         super()._preprocess()
-
-        self.bottom_half_nodes = self.get_nodes(self.bottom_half_p)
 
         self.neumann_interface_marker = 88
 
@@ -43,18 +41,8 @@ def compare_force_application() -> None:
     tct_apply.postprocess("u", "u", "y", "tractions_applied")
 
     u_k_app_error = np.zeros(tct.formatted_plot_results["u"].shape)
-    u_k_app_error[:, tct.overlapping_nodes, :] = tct.formatted_plot_results["u"][:, tct.overlapping_nodes, :] - tct_apply.formatted_plot_results["u"][:, tct_apply.overlapping_nodes, :]
+    u_k_app_error[:, tct.bottom_half_nodes, :] = tct.formatted_plot_results["u"][:, tct.bottom_half_nodes, :] - tct_apply.formatted_plot_results["u"][:, tct_apply.bottom_half_nodes, :]
     tct.postprocess(u_k_app_error, "u", "norm", "tractions_applied_error")
-
-
-def compare_force_application_v2() -> None:
-    with open("results/training_out_v11.npy", "rb") as f:
-        tractions = np.load(f)[8, :, :]
-
-    tct_apply = TCTApplyFixedTractions(tractions, frequency=1100)
-    tct_apply.run()
-
-    tct_apply.postprocess("u", "u", "y", "tractions_applied_test")
 
 
 if __name__ == "__main__":
