@@ -136,18 +136,18 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             self._dirichlet_bcs[marker] = (func, dofs)
 
             if V not in self._applied_dirichlet_bcs[0]:
-                self._applied_dirichlet_bcs[0].append(V)
+                self._applied_dirichlet_bcs[0].append(V.mesh)
                 self._applied_dirichlet_bcs[1].append([])
 
-            i = self._applied_dirichlet_bcs[0].index(V)
+            i = self._applied_dirichlet_bcs[0].index(V.mesh)
             self._applied_dirichlet_bcs[1][i].append(dirichletbc(func, nodes))
 
-    def get_dirichlet_bcs(self, V=None):
-        if V is None:
-            V = self.V
+    def get_dirichlet_bcs(self, mesh=None):
+        if mesh is None:
+            mesh = self.mesh
 
         try:
-            index = self._applied_dirichlet_bcs[0].index(V)
+            index = self._applied_dirichlet_bcs[0].index(mesh)
             return self._applied_dirichlet_bcs[1][index]
         except ValueError:
             return []
@@ -165,7 +165,6 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
                     [],
                     [],
                     [],
-                    V
                 )
 
             facet_info[mesh][0].append(facets)
@@ -187,15 +186,15 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
             for marker in facet_info[2]:
                 L += dot(self._neumann_bcs[marker][0], v) * ds(marker)
 
-            self._applied_neumann_bcs[0].append(facet_info[3])
+            self._applied_neumann_bcs[0].append(mesh)
             self._applied_neumann_bcs[1].append(L)
 
-    def apply_neumann_bcs(self, L, V=None):
-        if V is None:
-            V = self.V
+    def apply_neumann_bcs(self, L, mesh=None):
+        if mesh is None:
+            mesh = self.mesh
 
         try:
-            index = self._applied_neumann_bcs[0].index(V)
+            index = self._applied_neumann_bcs[0].index(mesh)
             L += self._applied_neumann_bcs[1][index]
         except ValueError:
             logger.warning("No Neumann BCs applied to this function space.")
@@ -575,9 +574,9 @@ class StructuralSimulation(FenicsxSimulation):
         a = mass_term + stiffness_term
 
         L_body = dot(f, v) * dx_
-        L = self.apply_neumann_bcs(L_body, V)
+        L = self.apply_neumann_bcs(L_body, V.mesh)
 
-        return u_next, a - L, self.get_dirichlet_bcs(V)
+        return u_next, a - L, self.get_dirichlet_bcs(V.mesh)
 
     def get_traction_problem(self, f_interface, u_t_next, u_t_k, v_t_k, a_t_k, f_t, ds_t, constitutive_model: str = None, alpha_k=None) -> tuple:
         sigma_func, _, sigma_kwargs = self.get_constitutive_functions(constitutive_model, alpha_k)
