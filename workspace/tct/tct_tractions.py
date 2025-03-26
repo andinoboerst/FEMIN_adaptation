@@ -22,7 +22,7 @@ class TCTExtractTractions(TCTSimulation):
 
         self.solve_u()
 
-        self.data_out[self.step, :] = self.calculate_interface_tractions()
+        self.data_out[self.step, :] = - self.calculate_interface_tractions()
 
 
 class TCTApplyTractions(TCTSimulation):

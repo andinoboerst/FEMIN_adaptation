@@ -4,7 +4,7 @@ import logging
 from functools import partial
 
 from mpi4py import MPI
-from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_geometrical
+from dolfinx.fem import Constant, Function, functionspace, dirichletbc, locate_dofs_topological
 from dolfinx.mesh import meshtags, locate_entities
 from dolfinx.plot import vtk_mesh
 from dolfinx.fem.petsc import LinearProblem, NonlinearProblem
@@ -99,16 +99,29 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
 
         self.plot_results = {key: [] for key in self._plot_variables().keys()}
 
-    def get_nodes(self, marker, V=None) -> np.array:
+    def get_nodes(self, marker, V=None, points: bool = True) -> np.array:
         if V is None:
             V = self.V
 
-        nodes = locate_dofs_geometrical(V, marker)
-        coords = V.mesh.geometry.x[nodes]
+        mesh = V.mesh
+        mesh_dim = mesh.topology.dim
+
+        if points:
+            fdim = 0
+        else:
+            fdim = mesh_dim
+
+        coords = np.around(V.tabulate_dof_coordinates(), decimals=3)
+
+        # Find the facets on the top boundary
+        entities = locate_entities(mesh, fdim, marker)
+
+        mesh.topology.create_connectivity(fdim, 2)
+        nodes = locate_dofs_topological(V, fdim, entities)
 
         coords_dtype = coords.dtype
         dt = [('x', coords_dtype), ('y', coords_dtype), ('z', coords_dtype)]
-        ind = np.argsort(coords.ravel().view(dt), order=['x', 'y', 'z'])
+        ind = np.argsort(coords[nodes].ravel().view(dt), order=['x', 'y', 'z'])
         return nodes[ind]
 
     def get_dofs(self, nodes, value_dim: int = 1) -> np.array:
@@ -157,7 +170,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         for boundary, marker, V in self._neumann_bcs_list:
             mesh = V.mesh
             fdim = mesh.topology.dim - 1
-            dofs = self.get_dofs(locate_dofs_geometrical(V, boundary))
+            dofs = self.get_dofs(self.get_nodes(boundary, V))
             self._neumann_bcs[marker] = (Function(V), dofs)
             facets = locate_entities(mesh, fdim, boundary)
             if mesh not in facet_info:
@@ -464,21 +477,21 @@ class StructuralSimulation(FenicsxSimulation):
         W_t = functionspace(mesh_t, (*self.element_type_sigma, (2, 2)))
 
         self.f_res = Function(V_t)
-        self.u_t_next = Function(V_t)
-        self.u_t_k = Function(V_t)
-        self.v_t_k = Function(V_t)
-        self.a_t_k = Function(V_t)
+        self.u_next_t = Function(V_t)
+        self.u_k_t = Function(V_t)
+        self.v_k_t = Function(V_t)
+        self.a_k_t = Function(V_t)
         self.f_t = Constant(mesh_t, self.body_force)  # Force term
-        self.alpha_t_k = Function(W_t)
+        self.alpha_k_t = Function(W_t)
 
         # Full simulation
         self.overlapping_nodes = self.get_nodes(function_overlapping_points, V=V)
-        self.overlapping_elements_sigma = self.get_dofs(self.get_nodes(function_overlapping_elements, V=W), value_dim=2)
+        self.overlapping_elements_sigma = self.get_dofs(self.get_nodes(function_overlapping_elements, V=W, points=False), value_dim=2)
         self.overlapping_dofs = self.get_dofs(self.overlapping_nodes)
 
         # Traction extraction
         self.overlapping_nodes_t = self.get_nodes(function_overlapping_points, V=V_t)
-        self.overlapping_elements_sigma_t = self.get_dofs(self.get_nodes(function_overlapping_elements, V=W_t), value_dim=2)
+        self.overlapping_elements_sigma_t = self.get_dofs(self.get_nodes(function_overlapping_elements, V=W_t, points=False), value_dim=2)
         self.overlapping_dofs_t = self.get_dofs(self.overlapping_nodes_t)
 
         interface_nodes_t = self.get_nodes(interface_function, V=V_t)
@@ -486,24 +499,16 @@ class StructuralSimulation(FenicsxSimulation):
 
         interface_marker_t = 88
 
-        facet_indices, facet_markers = [], []
-
         fdim = mesh_t.topology.dim - 1
-
-        facets = locate_entities(mesh_t, fdim, interface_function)
-        facet_indices.append(facets)
-        facet_markers.append(np.full_like(facets, interface_marker_t))
-
-        facet_indices = np.hstack(facet_indices).astype(np.int32)
-        facet_markers = np.hstack(facet_markers).astype(np.int32)
-        sorted_facets = np.argsort(facet_indices)
-        facet_tag = meshtags(mesh_t, fdim, facet_indices[sorted_facets], facet_markers[sorted_facets])
+        facets = locate_entities(mesh_t, fdim, interface_function).astype(np.int32)
+        facets_marker = np.full_like(facets, interface_marker_t).astype(np.int32)
+        facet_tag = meshtags(mesh_t, fdim, facets, facets_marker)
 
         ds_t = Measure("ds", domain=mesh_t, subdomain_data=facet_tag)(interface_marker_t)
 
         self.add_dirichlet_bc(lambda x: ~interface_function(x), 1234, V_t)
 
-        return self.f_res, self.u_t_next, self.u_t_k, self.v_t_k, self.a_t_k, self.f_t, ds_t, self.constitutive_model, self.alpha_t_k
+        return self.f_res, self.u_next_t, self.u_k_t, self.v_k_t, self.a_k_t, self.f_t, ds_t, self.constitutive_model, self.alpha_k_t
 
     @staticmethod
     def epsilon(u):
@@ -610,11 +615,11 @@ class StructuralSimulation(FenicsxSimulation):
             return u_problem, acceleration_problem, velocity_problem, alpha_problem
 
     def calculate_interface_tractions(self) -> None:
-        self.alpha_t_k.x.array[self.overlapping_elements_sigma_t] = self.alpha_k.x.array[self.overlapping_elements_sigma].copy()
-        self.u_t_next.x.array[self.overlapping_dofs_t] = self.u_next.x.array[self.overlapping_dofs].copy()
-        self.u_t_k.x.array[self.overlapping_dofs_t] = self.u_k.x.array[self.overlapping_dofs].copy()
-        self.v_t_k.x.array[self.overlapping_dofs_t] = self.v_k.x.array[self.overlapping_dofs].copy()
-        self.a_t_k.x.array[self.overlapping_dofs_t] = self.a_k.x.array[self.overlapping_dofs].copy()
+        self.alpha_k_t.x.array[self.overlapping_elements_sigma_t] = self.alpha_k.x.array[self.overlapping_elements_sigma].copy()
+        self.u_next_t.x.array[self.overlapping_dofs_t] = self.u_next.x.array[self.overlapping_dofs].copy()
+        self.u_k_t.x.array[self.overlapping_dofs_t] = self.u_k.x.array[self.overlapping_dofs].copy()
+        self.v_k_t.x.array[self.overlapping_dofs_t] = self.v_k.x.array[self.overlapping_dofs].copy()
+        self.a_k_t.x.array[self.overlapping_dofs_t] = self.a_k.x.array[self.overlapping_dofs].copy()
 
         self.traction_problem.solve()
 
