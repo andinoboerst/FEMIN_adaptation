@@ -25,7 +25,7 @@ class TCTApplyFixedDisp(TCTSimulation):
         self.prediction_input = np.zeros((self.num_steps, len(self.interface_dofs)))
 
     def _solve_time_step(self) -> None:
-        self.prediction_input[self.step, :] = - self.calculate_interface_tractions()
+        self.prediction_input[self.step, :] = self.calculate_interface_tractions()
 
         self.update_dirichlet_bc(self.disps[self.step], self.interface_marker)
 
@@ -57,7 +57,7 @@ def compare_disp_application() -> None:
     formatted_prediction_error = format_vectors_from_flat(prediction_error)
     formatted_prediction_error = formatted_prediction_error[::100]
 
-    tct_extract.postprocess(formatted_prediction_error, "u", "norm", "disps_tractions_error")
+    tct_extract.postprocess(formatted_prediction_error[1:], "u", "norm", "disps_tractions_error")
 
     error = np.zeros(tct_extract.formatted_plot_results["u"].shape)
     error[:, tct_extract.bottom_half_nodes] = tct_extract.formatted_plot_results["u"][:, tct_extract.bottom_half_nodes] - tct_apply.formatted_plot_results["u"][:, tct_apply.bottom_half_nodes]

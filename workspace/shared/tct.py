@@ -56,6 +56,8 @@ class TCTSimulation(StructuralSimulation):
     def _preprocess(self) -> None:
         super()._preprocess()
 
+        self.v_k.interpolate(self.initial_velocity)  # Set initial velocity
+
         self.add_dirichlet_bc(self.top_boundary, 2222)
 
         self.interface_nodes = self.get_nodes(self.interface_boundary)
@@ -75,6 +77,11 @@ class TCTSimulation(StructuralSimulation):
         )
 
         self.bottom_half_nodes = self.get_nodes(self.bottom_half_p)
+
+    def initial_velocity(self, x: np.array) -> np.array:
+        res = np.zeros((2, len(x[1])))
+        res[1, :] = (((50 - x[1]) / 50) * self.omega * self.amplitude * np.cos(self.omega * 0))
+        return res
 
     def _define_differential_equations(self) -> None:
         super()._define_differential_equations()

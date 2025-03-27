@@ -12,8 +12,6 @@ class TCTExtractTractions(TCTSimulation):
     def _preprocess(self) -> None:
         super()._preprocess()
 
-        self.bottom_half_nodes = self.get_nodes(self.bottom_half_p)
-
         self.data_in = np.zeros((self.num_steps, len(self.interface_dofs)))
         self.data_out = np.zeros((self.num_steps, len(self.interface_dofs)))
 

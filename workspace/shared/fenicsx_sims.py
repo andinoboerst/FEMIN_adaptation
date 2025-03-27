@@ -300,7 +300,7 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
     def check_export_results(self) -> bool:
         return self.step % 100 == 0
 
-    def _update_prev_values(self) -> None:
+    def update_prev_values(self) -> None:
         pass
 
     def solve_time_step(self) -> None:
@@ -309,8 +309,6 @@ class FenicsxSimulation(metaclass=abc.ABCMeta):
         if self.check_export_results():
             for key, res in self._plot_variables().items():
                 self.plot_results[key].append(res.x.array.copy())
-
-        self._update_prev_values()
 
     def advance_time(self) -> None:
         self.time += self.dt
@@ -411,8 +409,8 @@ class StructuralSimulation(FenicsxSimulation):
 
     tol = 1e-6
 
-    beta = 0.5
-    gamma = 1
+    beta = 0.25
+    gamma = 0.5
 
     constitutive_model_options = ["elastic", "plastic"]
     constitutive_model = "elastic"
@@ -630,12 +628,14 @@ class StructuralSimulation(FenicsxSimulation):
 
     def solve_u(self) -> None:
 
+        self.update_prev_values()
+
         for problem in self.main_problems:
             problem.solve()
 
         # print(f"Solved step {self.step}, ||u_|| = {np.linalg.norm(self.u_next.x.array):.2f}, ||alpha_|| = {np.linalg.norm(self.alpha_next.x.array):.2f}")
 
-    def _update_prev_values(self) -> None:
+    def update_prev_values(self) -> None:
         self.u_k.x.array[:] = self.u_next.x.array[:]
         self.v_k.x.array[:] = self.v_next.x.array[:]
         self.a_k.x.array[:] = self.a_next.x.array[:]
